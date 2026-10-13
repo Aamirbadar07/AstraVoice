@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NovaVoice – Real-Time Voice AI Agent</title>
+  <meta name="description" content="NovaVoice: a real-time voice AI booking assistant powered by the Gemini Live API and Google Calendar." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Tokens ──────────────────────────────────────────────────
+       The orb is the only loud thing on the page. Everything around
+       it is a quiet instrument panel: hairlines, no cards, no shadows. */
+    :root {
+      --void:  #09060f;   /* deep space, violet-biased so the ember reads hotter */
+      --ash:   #130c1e;
+      --rule:  #2b1d3d;
+      --ember: #ff6b1a;   /* the machine */
+      --flare: #ffc54d;
+      --plasma:#ff3d00;
+      --ice:   #6bd5ff;   /* you */
+      --mist:  #9a8ba8;
+      --text:  #efe6f5;
+      --stage: min(56vh, 500px);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      background: var(--void);
+      color: var(--text);
+      font-family: 'IBM Plex Sans', system-ui, sans-serif;
+      font-variant-numeric: tabular-nums;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    #starfield { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+
+    #shell {
+      position: relative; z-index: 1;
+      height: 100vh; height: 100dvh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      grid-template-columns: 1fr minmax(19rem, 26rem);
+      grid-template-areas: "rail rail" "stage side";
+    }
+
+    /* ── Top rail ─────────────────────────────────────────────── */
+    #rail {
+      grid-area: rail;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem; flex-wrap: wrap;
+      padding: .85rem 1.5rem;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .mark {
+      font-family: 'Chakra Petch', sans-serif;
+      font-weight: 600; font-size: .95rem; letter-spacing: .24em;
+    }
+    .mark span { color: var(--ember); }
+
+    .rail-readouts { display: flex; gap: 1.6rem; }
+
+    .readout { display: flex; flex-direction: column; gap: .1rem; min-width: 4.25rem; }
+    .readout .k { font-size: .68rem; color: var(--mist); }
+    .readout .v {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: .95rem; color: var(--flare);
+    }
+    .readout .v.cold { color: var(--ice); }
+    .readout .v.dim  { color: var(--mist); }
+
+    /* ── Orb stage ────────────────────────────────────────────── */
+    #stage { grid-area: stage; position: relative; min-height: 0; display: grid; place-items: center; }
+
+    #orb { width: 100%; height: 100%; display: block; }
+
+    /* A real button sits over the core so the page is keyboard-operable;
+       the orb itself is the visual, drawn on canvas. */
+    #call-btn {
+      position: absolute;
+      width: 26%; max-width: 190px; aspect-ratio: 1;
+      border: 0; border-radius: 50%;
+      background: transparent; cursor: pointer;
+    }
+    #call-btn:disabled { cursor: progress; }
+    #call-btn:focus-visible { outline: 2px solid var(--flare); outline-offset: 10px; }
+
+    #call-hint {
+      position: absolute; bottom: 1.1rem; left: 0; right: 0;
+      margin: 0; text-align: center;
+      font-size: .8rem; color: var(--mist);
+    }
+
+    /* ── Side panel ───────────────────────────────────────────── */
+    #side {
+      grid-area: side;
+      border-left: 1px solid var(--rule);
+      display: grid; grid-template-rows: 1fr auto; min-height: 0;
+    }
+
+    #transcript {
+      overflow-y: auto; min-height: 0;
+      padding: 1.15rem 1.25rem;
+      display: flex; flex-direction: column; gap: .8rem;
+    }
+
+    .msg {
+      border-left: 2px solid var(--rule);
+      padding-left: .7rem;
+      font-size: .9rem; line-height: 1.55;
+      white-space: pre-wrap;
+    }
+    .msg.user   { border-left-color: var(--ice);   color: #cfe9f7; }
+    .msg.agent  { border-left-color: var(--ember); color: var(--text); }
+    .msg.system { color: var(--mist); font-size: .8rem; }
+    .msg.tool {
+      border-left-color: var(--flare);
+      background: rgba(255,107,26,.06);
+      padding: .5rem .7rem; border-radius: 0 3px 3px 0;
+    }
+    .tool-name {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: .82rem; color: var(--flare);
+    }
+    .tool-arg { font-size: .76rem; color: var(--mist); white-space: pre-wrap; }
+
+    #telemetry {
+      border-top: 1px solid var(--rule);
+      padding: .95rem 1.25rem;
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem 1rem;
+    }
+    .tm { display: flex; flex-direction: column; gap: .1rem; }
+    .tm .k { font-size: .66rem; color: var(--mist); }
+    .tm .v { font-family: 'Chakra Petch', sans-serif; font-size: 1.02rem; }
+
+    /* ── Key dialog (AUTH_MODE 'key' only; hidden when ephemeral) ─ */
+    #setup-modal {
+      position: fixed; inset: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(9,6,15,.92);
+    }
+    #setup-modal .card {
+      width: min(90vw, 25rem);
+      border: 1px solid var(--rule); background: var(--ash);
+      padding: 1.75rem; border-radius: 4px;
+    }
+    #setup-modal h1 {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 1.15rem; margin: 0 0 .4rem;
+    }
+    #setup-modal p { margin: 0 0 1.1rem; font-size: .85rem; color: var(--mist); }
+    #setup-modal label { display: block; font-size: .7rem; color: var(--mist); margin-bottom: .35rem; }
+    #api-key-input {
+      width: 100%; padding: .6rem .7rem; margin-bottom: .9rem;
+      background: var(--void); border: 1px solid var(--rule);
+      color: var(--text); border-radius: 3px; font: inherit;
+    }
+    #api-key-input:focus-visible { outline: 2px solid var(--flare); outline-offset: 1px; }
+    #connect-btn, #key-settings-btn {
+      font: inherit; cursor: pointer; border-radius: 3px;
+      border: 1px solid var(--ember); background: transparent; color: var(--flare);
+    }
+    #connect-btn { width: 100%; padding: .6rem; }
+    #key-settings-btn { padding: .3rem .7rem; font-size: .78rem; }
+    #connect-btn:hover, #key-settings-btn:hover { background: rgba(255,107,26,.12); }
+
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
+
+    #transcript::-webkit-scrollbar { width: 3px; }
+    #transcript::-webkit-scrollbar-thumb { background: var(--rule); }
+
+    @media (max-width: 860px) {
+      #shell {
+        grid-template-columns: 1fr;
+        grid-template-areas: "rail" "stage" "side";
+        grid-template-rows: auto var(--stage) 1fr;
+      }
+      #side { border-left: 0; border-top: 1px solid var(--rule); }
+      #rail { padding: .75rem 1rem; }
+      .rail-readouts { gap: 1.1rem; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="starfield" aria-hidden="true"></canvas>
+
+<!-- Key dialog. Only reachable when AUTH_MODE is 'key' (debugging). -->
+<div id="setup-modal">
+  <div class="card">
+    <h1>Gemini API key</h1>
+    <p>This page is running in direct-key mode. In the shipped mode the key stays on the server and this dialog never appears.</p>
+    <label for="api-key-input">Key</label>
+    <input id="api-key-input" type="password" placeholder="AIza…" autocomplete="off" />
+    <button id="connect-btn">Use this key</button>
+  </div>
+</div>
+
+<div id="shell">
+
+  <header id="rail">
+    <div class="mark">NOVA<span>VOICE</span></div>
+    <div class="rail-readouts">
+      <div class="readout"><span class="k">link</span><span class="v dim" id="rv-link">offline</span></div>
+      <div class="readout"><span class="k">reply</span><span class="v" id="rv-latency">—</span></div>
+      <div class="readout"><span class="k">actions</span><span class="v" id="rv-calls">0</span></div>
+      <button id="key-settings-btn" type="button">Key</button>
+    </div>
+  </header>
+
+  <section id="stage">
+    <canvas id="orb" aria-hidden="true"></canvas>
+    <button id="call-btn" type="button" disabled>
+      <span class="sr-only" id="call-btn-label">Start call</span>
+    </button>
+    <p id="call-hint">Tap the core to talk</p>
+  </section>
+
+  <aside id="side">
+    <div id="transcript" role="log" aria-live="polite"></div>
+    <div id="telemetry">
+      <div class="tm"><span class="k">day</span><span class="v" id="tm-day">—</span></div>
+      <div class="tm"><span class="k">booked</span><span class="v" id="tm-busy">—</span></div>
+      <div class="tm"><span class="k">last action</span><span class="v" id="tm-tool">—</span></div>
+      <div class="tm"><span class="k">bridge</span><span class="v" id="tm-bridge">—</span></div>
+    </div>
+  </aside>
+
+</div>
+
+
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   Starfield
+════════════════════════════════════════════════════════════════════ */
+const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+(function () {
+  const canvas = document.getElementById('starfield');
+  const ctx = canvas.getContext('2d');
+  let stars = [];
+
+  function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    const n = Math.round(innerWidth * innerHeight / 14000);
+    stars = Array.from({ length: n }, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: Math.random() * 1.1 + .25,
+      a: Math.random() * .5 + .15,
+      // A few embers drift warm; the rest stay cold and distant.
+      warm: Math.random() < .12
+    }));
+  }
+  resize();
+  addEventListener('resize', resize);
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const s of stars) {
+      if (!REDUCED_MOTION) { s.y -= .02; if (s.y < 0) s.y = canvas.height; }
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = s.warm ? `rgba(255,170,90,${s.a})` : `rgba(190,200,230,${s.a * .7})`;
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ════════════════════════════════════════════════════════════════════
+   The orb
+
+   Not decoration: the outer ring is a dial of the working day. Busy
+   blocks from check_availability burn dark on it, free windows from
+   find_free_slots glow. So asking about a day visibly lights it up.
+════════════════════════════════════════════════════════════════════ */
+// Must match WORK_START_HOUR / WORK_END_HOUR in .env for the dial to be honest.
+const WORK_HOURS = [9, 18];
+
+const Orb = (function () {
+  const canvas = document.getElementById('orb');
+  const ctx = canvas.getContext('2d');
+
+  const DIAL_FROM = Math.PI * 0.75;   // 9:00 sits lower-left
+  const DIAL_SWEEP = Math.PI * 1.5;   // 270 degrees of working day
+
+  let W = 0, H = 0;
+  let agentE = 0, micE = 0;           // 0..1 audio energy
+  let state = 'offline';
+  let busy = [], free = [];
+  let boot = 0;                       // 0..1 ignition
+  const start = performance.now();
+
+  function resize() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const r = canvas.getBoundingClientRect();
+    W = r.width; H = r.height;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  addEventListener('resize', resize);
+
+  const hourAngle = h =>
+    DIAL_FROM + (h - WORK_HOURS[0]) / (WORK_HOURS[1] - WORK_HOURS[0]) * DIAL_SWEEP;
+
+  function drawCore(cx, cy, R, energy, t) {
+    // Corona: tendrils driven by two out-of-phase waves plus live audio.
+    const spikes = 150;
+    ctx.beginPath();
+    for (let i = 0; i <= spikes; i++) {
+      const a = i / spikes * Math.PI * 2;
+      const n = Math.sin(a * 5 + t * 1.4) * .075
+              + Math.sin(a * 11 - t * 2.1) * .075
+              + Math.sin(a * 17 + t * 3.3) * .05
+              + Math.sin(a * 23 - t * 1.9) * .03
+              + Math.sin(a * 3 + t * .7) * .05;
+      const rr = R * (1.2 + n + energy * .42);
+      const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    const corona = ctx.createRadialGradient(cx, cy, R * .3, cx, cy, R * 1.6);
+    corona.addColorStop(0, `rgba(255,96,10,${.85 * boot})`);
+    corona.addColorStop(1, 'rgba(190,20,0,0)');
+    ctx.fillStyle = corona;
+    ctx.fill();
+
+    // Outer bloom.
+    const bloom = ctx.createRadialGradient(cx, cy, R * .6, cx, cy, R * 3.2);
+    bloom.addColorStop(0, `rgba(255,107,26,${.34 * boot})`);
+    bloom.addColorStop(1, 'rgba(255,107,26,0)');
+    ctx.fillStyle = bloom;
+    ctx.fillRect(cx - R * 3.2, cy - R * 3.2, R * 6.4, R * 6.4);
+
+    // The core itself.
+    const core = ctx.createRadialGradient(
+      cx - R * .15, cy - R * .18, R * .05, cx, cy, R * (1 + energy * .2)
+    );
+    core.addColorStop(0, `rgba(255,248,224,${boot})`);
+    core.addColorStop(.3, `rgba(255,197,77,${boot})`);
+    core.addColorStop(.72, `rgba(255,107,26,${boot})`);
+    core.addColorStop(1, `rgba(190,30,0,${boot})`);
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * (1 + energy * .2), 0, Math.PI * 2);
+    ctx.fillStyle = core;
+    ctx.fill();
+  }
+
+  function drawRings(cx, cy, R, t) {
+    // Three tilted orbits. They lean, so the orb reads as a sphere.
+    const orbits = [
+      { r: R * 2.05, tilt: .40, speed:  .22, w: 1.8, a: .68 },
+      { r: R * 2.55, tilt: -.62, speed: -.15, w: 1.3, a: .44 },
+      { r: R * 3.00, tilt: 1.15, speed:  .10, w: 1.0, a: .28 }
+    ];
+    for (const o of orbits) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(o.tilt + (REDUCED_MOTION ? 0 : t * o.speed));
+      ctx.beginPath();
+      ctx.ellipse(0, 0, o.r * boot, o.r * .34 * boot, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,170,80,${o.a * boot})`;
+      ctx.lineWidth = o.w;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawDial(cx, cy, R, t) {
+    const dr = R * 3.75;
+    ctx.lineCap = 'butt';
+
+    // The day itself.
+    ctx.beginPath();
+    ctx.arc(cx, cy, dr, DIAL_FROM, DIAL_FROM + DIAL_SWEEP);
+    ctx.strokeStyle = `rgba(150,122,188,${.7 * boot})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Hour ticks, labelled every three hours.
+    ctx.font = '10px "Chakra Petch", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let h = WORK_HOURS[0]; h <= WORK_HOURS[1]; h++) {
+      const a = hourAngle(h);
+      const long = (h - WORK_HOURS[0]) % 3 === 0;
+      const x1 = cx + Math.cos(a) * dr, y1 = cy + Math.sin(a) * dr;
+      const x2 = cx + Math.cos(a) * (dr + (long ? 8 : 4));
+      const y2 = cy + Math.sin(a) * (dr + (long ? 8 : 4));
+      ctx.beginPath();
+      ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      ctx.strokeStyle = `rgba(154,139,168,${(long ? .8 : .4) * boot})`;
+      ctx.stroke();
+      if (long) {
+        ctx.fillStyle = `rgba(154,139,168,${.9 * boot})`;
+        ctx.fillText(String(h), cx + Math.cos(a) * (dr + 20), cy + Math.sin(a) * (dr + 20));
+      }
+    }
+
+    // Free windows glow, booked blocks burn dark.
+    const band = (ranges, colour, width) => {
+      ctx.lineWidth = width;
+      for (const [from, to] of ranges) {
+        if (to <= WORK_HOURS[0] || from >= WORK_HOURS[1]) continue;
+        const a0 = hourAngle(Math.max(from, WORK_HOURS[0]));
+        const a1 = hourAngle(Math.min(to, WORK_HOURS[1]));
+        if (a1 - a0 < .004) continue;
+        ctx.beginPath();
+        ctx.arc(cx, cy, dr, a0, a1);
+        ctx.strokeStyle = colour;
+        ctx.stroke();
+      }
+    };
+    band(free, `rgba(255,197,77,${.55 * boot})`, 3);
+    band(busy, `rgba(255,61,0,${.95 * boot})`, 6);
+  }
+
+  function drawState(cx, cy, R, t) {
+    if (state === 'listening') {
+      // You are speaking: a cold ring, the one place ice appears on the orb.
+      const pulse = 1 + Math.sin(t * 4) * .02 + micE * .12;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * 1.5 * pulse, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(107,213,255,${(.35 + micE * .5) * boot})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    if (state === 'working') {
+      // A tool call is in flight.
+      ctx.save();
+      ctx.translate(cx, cy);
+      if (!REDUCED_MOTION) ctx.rotate(t * 1.6);
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 1.72, 0, Math.PI * 2);
+      ctx.setLineDash([R * .22, R * .3]);
+      ctx.strokeStyle = `rgba(255,197,77,${.8 * boot})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+  }
+
+  function frame(now) {
+    const t = (now - start) / 1000;
+    boot = REDUCED_MOTION ? 1 : Math.min(1, t / 1.4);
+
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2;
+    const R = Math.min(W, H) * 0.115;
+    const energy = Math.max(agentE, micE * .55);
+
+    drawDial(cx, cy, R, t);
+    drawRings(cx, cy, R, t);
+    drawCore(cx, cy, R, energy, t);
+    drawState(cx, cy, R, t);
+
+    // Decay, so the orb settles when nothing is talking.
+    agentE *= .92;
+    micE *= .90;
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  return {
+    setAgentEnergy: v => { agentE = Math.max(agentE, v); },
+    setMicEnergy:   v => { micE = Math.max(micE, v); },
+    setState:       s => { state = s; },
+    setBusy:        r => { busy = r; },
+    setFree:        r => { free = r; },
+    clearDay:       () => { busy = []; free = []; }
+  };
+})();
+
+/* Pull "09:00-11:00" style ranges out of a tool result into dial hours. */
+function parseRanges(text) {
+  const out = [];
+  const re = /(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})/g;
+  let m;
+  while ((m = re.exec(text || ''))) {
+    out.push([+m[1] + +m[2] / 60, +m[3] + +m[4] / 60]);
+  }
+  return out;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Config
+═══════════════════════════════════════════════════════════════════ */
+// If the socket closes immediately after connecting, check this against the
+// models your key can actually use: GET http://127.0.0.1:5000/api/live_models
+const GEMINI_LIVE_MODEL = 'models/gemini-3.1-flash-live-preview';
+const BRIDGE_URL   = 'http://127.0.0.1:5000';
+// Leave empty unless BRIDGE_TOKEN is also set in .env.
+const BRIDGE_TOKEN = '';
+
+// 'ephemeral' = the bridge mints a short-lived token; the real API key never
+// reaches this page. 'key' = the old behaviour, kept only as a fallback for
+// debugging. Ship on 'ephemeral'.
+const AUTH_MODE = 'ephemeral';
+
+// Ephemeral tokens are v1beta-only, so both modes use v1beta.
+const LIVE_WS_BASE =
+  'wss://generativelanguage.googleapis.com/ws/' +
+  'google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+
+const TOOL_ICONS = {
+  check_availability:  '\u{1F50D}',
+  find_free_slots:     '\u{1F5D3}\uFE0F',
+  propose_change:      '\u{1F4DD}',
+  book_meeting:        '\u{1F4C5}',
+  cancel_meeting:      '\u{1F5D1}\uFE0F',
+  reschedule_meeting:  '\u{1F504}'
+};
+
+function bridgeHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (BRIDGE_TOKEN) headers['X-Bridge-Token'] = BRIDGE_TOKEN;
+  return headers;
+}
+
+/* Ask the bridge for a single-use Live API token. */
+async function fetchEphemeralToken() {
+  const resp = await fetch(`${BRIDGE_URL}/api/live_token`, {
+    method: 'POST',
+    headers: bridgeHeaders(),
+    body: '{}'
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || !data.token) {
+    throw new Error(data.error || `bridge returned HTTP ${resp.status}`);
+  }
+  return data.token;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   UI helpers
+═══════════════════════════════════════════════════════════════════ */
+const callBtn    = document.getElementById('call-btn');
+const callBtnLabel = document.getElementById('call-btn-label');
+const transcript = document.getElementById('transcript');
+const callHint   = document.getElementById('call-hint');
+const rvLink     = document.getElementById('rv-link');
+const rvLatency  = document.getElementById('rv-latency');
+const rvCalls    = document.getElementById('rv-calls');
+const tmDay      = document.getElementById('tm-day');
+const tmBusy     = document.getElementById('tm-busy');
+const tmTool     = document.getElementById('tm-tool');
+const tmBridge   = document.getElementById('tm-bridge');
+
+// How a status maps to what the orb is doing. 'working' is set separately,
+// while a tool call is in flight.
+const ORB_STATE = {
+  listening: 'listening',
+  speaking:  'speaking',
+  ready:     'idle'
+};
+
+function setStatus(label, mode) {
+  rvLink.textContent = label;
+  rvLink.className = 'v' + (mode === 'listening' ? ' cold' : mode ? '' : ' dim');
+  if (ORB_STATE[mode]) Orb.setState(ORB_STATE[mode]);
+}
+
+/* ─── Telemetry ──────────────────────────────────────────────────
+   Numbers worth watching during a call: how long the agent took to
+   answer, how many actions it has taken, and what the calendar said. */
+let toolCallCount = 0;
+let lastUserSpeechAt = 0;   // last inputTranscription chunk
+let awaitingReply = false;  // true until the first audio of the agent's turn
+
+function noteReplyLatency() {
+  if (!awaitingReply || !lastUserSpeechAt) return;
+  awaitingReply = false;
+  rvLatency.textContent = `${Math.round(performance.now() - lastUserSpeechAt)} ms`;
+}
+
+/* Light the day dial from whatever the calendar just reported. */
+function paintDial(name, args, result) {
+  const day = (args.date || args.date_time || '').slice(0, 10);
+  if (day) tmDay.textContent = day;
+
+  if (name === 'check_availability') {
+    const blocks = parseRanges(result);
+    Orb.setBusy(blocks);
+    Orb.setFree([]);
+    tmBusy.textContent = blocks.length
+      ? `${blocks.length} block${blocks.length > 1 ? 's' : ''}`
+      : 'clear';
+  } else if (name === 'find_free_slots') {
+    Orb.setFree(parseRanges(result));
+  }
+}
+
+function addMsg(text, type) {
+  const el = document.createElement('div');
+  el.className = `msg ${type}`;
+  el.textContent = text;
+  transcript.appendChild(el);
+  transcript.scrollTop = transcript.scrollHeight;
+  return el;
+}
+
+function addToolCard(name, args) {
+  const el = document.createElement('div');
+  el.className = 'msg tool';
+  const argLines = Object.entries(args)
+    .map(([k, v]) => `  ↳ ${k}: ${v}`)
+    .join('\n');
+  el.innerHTML =
+    `<div class="tool-name">${TOOL_ICONS[name] || '\u2699\uFE0F'} Action: ${name}()</div>` +
+    `<div class="tool-arg">${argLines}</div>`;
+  transcript.appendChild(el);
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Core state
+═══════════════════════════════════════════════════════════════════ */
+let ws = null;
+let apiKey = '';
+
+// Audio – mic side
+let micStream = null;
+let audioCtxIn = null;
+let scriptProcessor = null;
+let micAnalyser = null;
+
+// Audio – playback side
+let audioCtxOut = null;
+let nextPlayTime = 0;
+let activeSources = [];
+let gainNode = null;
+let playAnalyser = null;
+
+// Transcript streaming helpers
+let currentUserBubble = null;
+let currentAgentBubble = null;
+
+/* ═══════════════════════════════════════════════════════════════════
+   Audio → orb
+
+   The orb runs its own animation loop; these two just feed it amplitude.
+   Agent speech drives the core, your voice drives the cold outer ring.
+═══════════════════════════════════════════════════════════════════ */
+function pumpEnergy(analyser, alive, sink) {
+  if (!analyser) return;
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  (function tick() {
+    if (!alive()) return;
+    analyser.getByteFrequencyData(data);
+    sink(data.reduce((s, v) => s + v, 0) / data.length / 255);
+    requestAnimationFrame(tick);
+  })();
+}
+
+function startVisualiser() {
+  pumpEnergy(playAnalyser, () => !!ws, v => Orb.setAgentEnergy(v));
+}
+
+function startMicVisualiser() {
+  pumpEnergy(micAnalyser, () => !!micStream, v => Orb.setMicEnergy(v));
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   PCM helpers
+═══════════════════════════════════════════════════════════════════ */
+function float32ToBase64(float32Array) {
+  const int16 = new Int16Array(float32Array.length);
+  for (let i = 0; i < float32Array.length; i++) {
+    int16[i] = Math.max(-32768, Math.min(32767, float32Array[i] * 32768));
+  }
+  const bytes = new Uint8Array(int16.buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function base64ToFloat32(b64, sampleRate = 24000) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const int16 = new Int16Array(bytes.buffer);
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+  return float32;
+}
+
+function scheduleAudioChunk(float32Data, sampleRate = 24000) {
+  if (!audioCtxOut) return;
+  const buffer = audioCtxOut.createBuffer(1, float32Data.length, sampleRate);
+  buffer.copyToChannel(float32Data, 0);
+
+  const source = audioCtxOut.createBufferSource();
+  source.buffer = buffer;
+  source.connect(gainNode);
+  source.connect(playAnalyser);
+
+  const startAt = Math.max(audioCtxOut.currentTime, nextPlayTime);
+  source.start(startAt);
+  nextPlayTime = startAt + buffer.duration;
+
+  activeSources.push(source);
+  source.onended = () => {
+    activeSources = activeSources.filter(s => s !== source);
+    if (activeSources.length === 0) setStatus('ready', 'ready');
+  };
+}
+
+function stopAllPlayback() {
+  activeSources.forEach(s => { try { s.stop(); } catch (_) {} });
+  activeSources = [];
+  if (audioCtxOut) nextPlayTime = audioCtxOut.currentTime;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   System prompt
+═══════════════════════════════════════════════════════════════════ */
+/* The agent's contract - prompt and tool schemas - lives in
+   session_config.json, so evals/run_evals.py can score the exact text and
+   schemas this page ships rather than a copy that drifts away from them. */
+let SESSION_CONFIG = null;
+
+/* Tool name -> bridge path is 1:1, but keep a closed allowlist so a
+   hallucinated tool name can never be turned into an arbitrary fetch.
+   Derived from the declarations, so the two cannot disagree. */
+let TOOL_ENDPOINTS = new Set();
+
+async function loadSessionConfig() {
+  if (SESSION_CONFIG) return SESSION_CONFIG;
+  const resp = await fetch('session_config.json', { cache: 'no-store' });
+  if (!resp.ok) throw new Error(`session_config.json returned HTTP ${resp.status}`);
+  SESSION_CONFIG = await resp.json();
+  TOOL_ENDPOINTS = new Set(SESSION_CONFIG.functionDeclarations.map(d => d.name));
+  return SESSION_CONFIG;
+}
+
+function buildSystemPrompt() {
+  const now = new Date();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const offset = -now.getTimezoneOffset();
+  const sign = offset >= 0 ? '+' : '-';
+  const h = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
+  const m = String(Math.abs(offset) % 60).padStart(2, '0');
+
+  return SESSION_CONFIG.systemPrompt
+    .replaceAll('{now}', now.toString())
+    .replaceAll('{timezone}', tz)
+    .replaceAll('{utcOffset}', `UTC${sign}${h}:${m}`)
+    .replaceAll('{offsetSuffix}', `${sign}${h}:${m}`);
+}
+
+/* âââââââââââââââââââââââââââââââââââââââââââââ
+   WebSocket + Gemini Live API
+âââââââââââââââââââââââââââââââââââââââââââââ */
+function buildSetupMessage() {
+  return {
+    setup: {
+      model: GEMINI_LIVE_MODEL,
+      // Without these two, the API never sends inputTranscription /
+      // outputTranscription and the transcript pane stays empty.
+      inputAudioTranscription: {},
+      outputAudioTranscription: {},
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } }
+        }
+      },
+      systemInstruction: { parts: [{ text: buildSystemPrompt() }] },
+      tools: [{ functionDeclarations: SESSION_CONFIG.functionDeclarations }]
+    }
+  };
+}
+
+async function handleMessage(raw) {
+  let text;
+  if (raw instanceof Blob) {
+    text = await raw.text();
+  } else {
+    text = raw;
+  }
+
+  let msg;
+  try { msg = JSON.parse(text); } catch { return; }
+
+  /* ── Tool call ─────────────────────────────────────────────── */
+  if (msg.toolCall) {
+    const responses = [];
+    Orb.setState('working');
+
+    for (const call of msg.toolCall.functionCalls) {
+      addToolCard(call.name, call.args || {});
+      rvCalls.textContent = ++toolCallCount;
+      const startedAt = performance.now();
+
+      let result = 'Error: bridge unreachable';
+      try {
+        if (!TOOL_ENDPOINTS.has(call.name)) {
+          throw new Error(`unknown tool '${call.name}'`);
+        }
+        const resp = await fetch(`${BRIDGE_URL}/api/${call.name}`, {
+          method: 'POST',
+          headers: bridgeHeaders(),
+          body: JSON.stringify(call.args || {})
+        });
+        if (!resp.ok) throw new Error(`bridge returned HTTP ${resp.status}`);
+        const data = await resp.json();
+        result = data.result;
+        tmBridge.textContent = `${Math.round(performance.now() - startedAt)} ms`;
+      } catch (err) {
+        result = `Error calling bridge: ${err.message}`;
+        tmBridge.textContent = 'error';
+        addMsg(`Bridge error: ${err.message}`, 'system');
+      }
+
+      tmTool.textContent = call.name.replace(/_/g, ' ');
+      paintDial(call.name, call.args || {}, result);
+
+      responses.push({
+        id: call.id,
+        name: call.name,
+        response: { output: result }
+      });
+    }
+
+    Orb.setState('idle');
+
+    ws.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
+    return;
+  }
+
+  /* ── Server content ────────────────────────────────────────── */
+  if (msg.serverContent) {
+    const sc = msg.serverContent;
+
+    // Barge-in
+    if (sc.interrupted) {
+      stopAllPlayback();
+      setStatus('listening', 'listening');
+      currentAgentBubble = null;
+    }
+
+    // Turn complete
+    if (sc.turnComplete) {
+      currentAgentBubble = null;
+      currentUserBubble  = null;
+    }
+
+    // Output transcription (agent speech-to-text)
+    if (sc.outputTranscription?.text) {
+      if (!currentAgentBubble) {
+        currentAgentBubble = addMsg('', 'agent');
+        setStatus('replying', 'speaking');
+      }
+      currentAgentBubble.textContent += sc.outputTranscription.text;
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+
+    // Input transcription (user speech-to-text). The clock for "reply" starts
+    // at the last word you were heard saying.
+    if (sc.inputTranscription?.text) {
+      if (!currentUserBubble) {
+        currentUserBubble = addMsg('', 'user');
+      }
+      currentUserBubble.textContent += sc.inputTranscription.text;
+      lastUserSpeechAt = performance.now();
+      awaitingReply = true;
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+
+    // Audio parts from modelTurn
+    const parts = sc.modelTurn?.parts || [];
+    for (const part of parts) {
+      if (part.inlineData?.mimeType?.startsWith('audio/pcm') && part.inlineData.data) {
+        noteReplyLatency();   // first audio of this turn
+        const float32 = base64ToFloat32(part.inlineData.data, 24000);
+        scheduleAudioChunk(float32, 24000);
+        setStatus('replying', 'speaking');
+      }
+    }
+  }
+}
+
+async function startCall() {
+  setStatus('connecting', '');
+  callBtn.disabled = true;
+
+  try {
+    await loadSessionConfig();
+  } catch (err) {
+    addMsg(`Could not load session_config.json: ${err.message}. Serve this page over http://localhost, not file://.`, 'system');
+    setStatus('offline', '');
+    callBtn.disabled = false;
+    return;
+  }
+
+  // ── Mic ──
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    addMsg('Microphone API not available in this browser context. Please use Chrome on http://localhost:8000', 'system');
+    setStatus('no mic', '');
+    callBtn.disabled = false;
+    return;
+  }
+
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true }
+    });
+  } catch (err) {
+    addMsg(`Microphone error: ${err.message}`, 'system');
+    setStatus('offline', '');
+    callBtn.disabled = false;
+    return;
+  }
+
+  audioCtxIn = new AudioContext({ sampleRate: 16000 });
+  const source = audioCtxIn.createMediaStreamSource(micStream);
+
+  micAnalyser = audioCtxIn.createAnalyser();
+  micAnalyser.fftSize = 256;
+  source.connect(micAnalyser);
+
+  scriptProcessor = audioCtxIn.createScriptProcessor(1024, 1, 1);
+  source.connect(scriptProcessor);
+  scriptProcessor.connect(audioCtxIn.destination);
+
+  // ── Playback context ──
+  audioCtxOut = new AudioContext({ sampleRate: 24000 });
+  gainNode = audioCtxOut.createGain();
+  gainNode.connect(audioCtxOut.destination);
+
+  playAnalyser = audioCtxOut.createAnalyser();
+  playAnalyser.fftSize = 256;
+  gainNode.connect(playAnalyser);
+
+  // ── WebSocket ──
+  let wsUrl;
+  if (AUTH_MODE === 'ephemeral') {
+    setStatus('authorising', '');
+    let token;
+    try {
+      token = await fetchEphemeralToken();
+    } catch (err) {
+      addMsg(`Could not get a session token: ${err.message}. Is api_server.py running?`, 'system');
+      setStatus('offline', '');
+      cleanupAudio();
+      callBtn.disabled = false;
+      return;
+    }
+    wsUrl = `${LIVE_WS_BASE}?access_token=${encodeURIComponent(token)}`;
+  } else {
+    wsUrl = `${LIVE_WS_BASE}?key=${encodeURIComponent(apiKey)}`;
+  }
+
+  console.log(`Connecting to Live WebSocket (${AUTH_MODE} auth)...`);
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    console.log('WebSocket opened, sending setup message...');
+    ws.send(JSON.stringify(buildSetupMessage()));
+    setStatus('live', 'ready');
+    callBtn.disabled = false;
+    callBtnLabel.textContent = 'End call';
+    callHint.textContent = 'Tap the core to end the call';
+    addMsg('Connected. Ask about your calendar.', 'system');
+    startMicVisualiser();
+    startVisualiser();
+  };
+
+  ws.onmessage = e => handleMessage(e.data);
+
+  ws.onerror = (err) => {
+    console.error('WebSocket error:', err);
+    addMsg('WebSocket error – check your API key and network.', 'system');
+    endCall();
+  };
+
+  ws.onclose = (e) => {
+    console.log(`WebSocket closed: code ${e.code}, reason: ${e.reason}`);
+    if (e.code !== 1000) {
+      addMsg(`Connection closed (${e.code}: ${e.reason || 'network or model error'})`, 'system');
+    }
+    cleanupAudio();
+    setStatus('offline', '');
+    Orb.setState('offline');
+    callBtn.disabled = false;
+    callBtnLabel.textContent = 'Start call';
+    callHint.textContent = 'Tap the core to talk';
+    ws = null;
+  };
+
+  // ── Stream mic ──
+  scriptProcessor.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const float32 = e.inputBuffer.getChannelData(0);
+    ws.send(JSON.stringify({
+      realtimeInput: {
+        audio: { mimeType: 'audio/pcm;rate=16000', data: float32ToBase64(float32) }
+      }
+    }));
+    setStatus('listening', 'listening');
+  };
+}
+
+function cleanupAudio() {
+  stopAllPlayback();
+  if (scriptProcessor) { try { scriptProcessor.disconnect(); } catch(_){} scriptProcessor = null; }
+  if (audioCtxIn)  { audioCtxIn.close();  audioCtxIn = null; }
+  if (audioCtxOut) { audioCtxOut.close(); audioCtxOut = null; }
+  if (micStream)   { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  gainNode = null; playAnalyser = null; micAnalyser = null;
+}
+
+function endCall() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.close(1000, 'User ended call');
+  }
+  cleanupAudio();
+  callBtn.disabled = false;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Connect button & initialization
+═══════════════════════════════════════════════════════════════════ */
+if (AUTH_MODE === 'ephemeral') {
+  // No key is needed in the browser. Remove any key a previous version stored,
+  // and hide the key UI so it cannot be reintroduced by habit.
+  try { localStorage.removeItem('novavoice_gemini_key'); } catch (_) {}
+  document.getElementById('setup-modal').style.display = 'none';
+  document.getElementById('key-settings-btn').style.display = 'none';
+  callBtn.disabled = false;
+  setStatus('standby', 'ready');
+  addMsg('Standing by. The API key stays on the server; this page gets a short-lived token per call.', 'system');
+} else {
+  const savedKey = localStorage.getItem('novavoice_gemini_key');
+  if (savedKey) {
+    apiKey = savedKey;
+    document.getElementById('api-key-input').value = savedKey;
+    document.getElementById('setup-modal').style.display = 'none';
+    callBtn.disabled = false;
+    setStatus('standby', 'ready');
+  }
+}
+
+document.getElementById('connect-btn').addEventListener('click', () => {
+  const key = document.getElementById('api-key-input').value.trim();
+  if (!key) {
+    document.getElementById('api-key-input').style.borderColor = 'var(--plasma)';
+    return;
+  }
+  apiKey = key;
+  localStorage.setItem('novavoice_gemini_key', key);
+  document.getElementById('setup-modal').style.display = 'none';
+  callBtn.disabled = false;
+  setStatus('standby', 'ready');
+  addMsg('Key accepted. Tap the core to start.', 'system');
+});
+
+document.getElementById('api-key-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('connect-btn').click();
+});
+
+document.getElementById('key-settings-btn').addEventListener('click', () => {
+  document.getElementById('setup-modal').style.display = 'flex';
+  document.getElementById('api-key-input').focus();
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Call button toggle
+═══════════════════════════════════════════════════════════════════ */
+callBtn.addEventListener('click', () => {
+  console.log('Call button clicked, active state:', !!ws);
+  if (ws) {
+    endCall();
+  } else {
+    startCall();
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,121 @@
+{
+  "_comment": "Each case replays a conversation and scores the tool call the model makes next. 'turns' are prior exchanges: user text, model text, or a tool call and the result it got back. 'expect' names the tool that must be called; 'args' are checks on its arguments. Every case here guards a behaviour that broke, or that the two-phase write depends on. REFERENCE_DATE in run_evals.py is the 'today' the prompt is built with, so relative dates are deterministic.",
+
+  "cases": [
+    {
+      "name": "a plain question reads the calendar",
+      "turns": [{ "user": "what's on my calendar tomorrow?" }],
+      "expect": "check_availability",
+      "args": { "date_starts_with": "2026-10-21" }
+    },
+    {
+      "name": "booking checks availability before proposing",
+      "turns": [{ "user": "book me a meeting tomorrow at 3pm" }],
+      "expect": "check_availability",
+      "forbid": ["book_meeting", "propose_change"]
+    },
+    {
+      "name": "a free day leads to a proposal, not a booking",
+      "turns": [
+        { "user": "book me a meeting tomorrow at 3pm" },
+        { "tool": "check_availability", "args": { "date": "2026-10-21" },
+          "result": "The calendar is completely free on 2026-10-21." }
+      ],
+      "expect": "propose_change",
+      "args": { "action": "book", "date_time_starts_with": "2026-10-21T15:00" },
+      "forbid": ["book_meeting"]
+    },
+    {
+      "name": "a confirmed proposal is written with its code",
+      "turns": [
+        { "user": "book me a meeting tomorrow at 3pm" },
+        { "tool": "check_availability", "args": { "date": "2026-10-21" },
+          "result": "The calendar is completely free on 2026-10-21." },
+        { "tool": "propose_change", "args": { "action": "book", "date_time": "2026-10-21T15:00:00+05:30", "title": "Meeting" },
+          "result": "Ready to book 'Meeting' on Wednesday 21 October at 15:00 for 30 minutes. Confirm with the user, then call book_meeting with confirmation_code 'a1b2c3d4'." },
+        { "model": "That slot is free. Shall I book a 30-minute meeting tomorrow at 3pm?" },
+        { "user": "yes please" }
+      ],
+      "expect": "book_meeting",
+      "args": { "confirmation_code": "a1b2c3d4" }
+    },
+    {
+      "name": "a changed detail re-proposes instead of reusing the code",
+      "turns": [
+        { "user": "book me a meeting tomorrow at 3pm" },
+        { "tool": "check_availability", "args": { "date": "2026-10-21" },
+          "result": "The calendar is completely free on 2026-10-21." },
+        { "tool": "propose_change", "args": { "action": "book", "date_time": "2026-10-21T15:00:00+05:30", "title": "Meeting" },
+          "result": "Ready to book 'Meeting' on Wednesday 21 October at 15:00 for 30 minutes. Confirm with the user, then call book_meeting with confirmation_code 'a1b2c3d4'." },
+        { "model": "That slot is free. Shall I book a 30-minute meeting tomorrow at 3pm?" },
+        { "user": "actually make it 4pm instead" }
+      ],
+      "expect": "propose_change",
+      "args": { "action": "book", "date_time_starts_with": "2026-10-21T16:00" },
+      "forbid": ["book_meeting"]
+    },
+    {
+      "name": "an explicit length is carried into the proposal",
+      "turns": [
+        { "user": "book an hour with sam at sam@example.com on the 22nd at 2pm" },
+        { "tool": "check_availability", "args": { "date": "2026-10-22" },
+          "result": "The calendar is completely free on 2026-10-22." }
+      ],
+      "expect": "propose_change",
+      "args": { "action": "book", "duration_minutes": 60, "guest_email": "sam@example.com" }
+    },
+    {
+      "name": "a solo meeting invents no guest",
+      "turns": [
+        { "user": "put a 30 minute focus block on the 22nd at 10am, just for me" },
+        { "tool": "check_availability", "args": { "date": "2026-10-22" },
+          "result": "The calendar is completely free on 2026-10-22." }
+      ],
+      "expect": "propose_change",
+      "args": { "action": "book", "guest_email_absent": true }
+    },
+    {
+      "name": "a clash is answered with real free windows",
+      "turns": [
+        { "user": "book me a meeting on the 22nd at 11am" },
+        { "tool": "check_availability", "args": { "date": "2026-10-22" },
+          "result": "Events on 2026-10-22 (Asia/Kolkata):\n  - 11:00-12:00 Standup [id: busy1]" }
+      ],
+      "expect": "find_free_slots",
+      "forbid": ["book_meeting", "propose_change"]
+    },
+    {
+      "name": "cancelling looks up the event id first",
+      "turns": [{ "user": "cancel my standup on the 22nd" }],
+      "expect": "check_availability",
+      "forbid": ["cancel_meeting", "propose_change"]
+    },
+    {
+      "name": "a cancellation is proposed with the id it was given",
+      "turns": [
+        { "user": "cancel my standup on the 22nd" },
+        { "tool": "check_availability", "args": { "date": "2026-10-22" },
+          "result": "Events on 2026-10-22 (Asia/Kolkata):\n  - 11:00-12:00 Standup [id: busy1]" }
+      ],
+      "expect": "propose_change",
+      "args": { "action": "cancel", "event_id": "busy1" },
+      "forbid": ["cancel_meeting"]
+    },
+    {
+      "name": "'when am I free' asks for windows, not the event list",
+      "turns": [{ "user": "when am I free on the 22nd?" }],
+      "expect": "find_free_slots"
+    },
+    {
+      "name": "a reschedule is proposed, not written directly",
+      "turns": [
+        { "user": "move my standup on the 22nd to 4pm" },
+        { "tool": "check_availability", "args": { "date": "2026-10-22" },
+          "result": "Events on 2026-10-22 (Asia/Kolkata):\n  - 11:00-12:00 Standup [id: busy1]" }
+      ],
+      "expect": "propose_change",
+      "args": { "action": "reschedule", "event_id": "busy1", "new_date_time_starts_with": "2026-10-22T16:00" },
+      "forbid": ["reschedule_meeting"]
+    }
+  ]
+}
