@@ -1,13 +1,13 @@
-# NovaVoice 🎙️
+# AstraVoice 🎙️
 **Real-Time Voice AI Booking Assistant – Gemini Live API + Google Calendar**
 
 > Built from the Google Developer Codelab: *Build a Real-Time Voice AI Agent with the Gemini Live API, Antigravity and Google Calendar*
 
 ---
 
-## What is NovaVoice?
+## What is AstraVoice?
 
-NovaVoice is a voice assistant you talk to in real-time. It:
+AstraVoice is a voice assistant you talk to in real-time. It:
 - Listens via your microphone using the **Gemini Live API** (bidirectional WebSocket)
 - Checks your **Google Calendar** for availability
 - **Books meetings by voice** (30-minute events)
@@ -117,13 +117,13 @@ pip install -r requirements.txt
 
 #### 5b. Configure the OAuth Consent Screen
 1. Cloud Console → **APIs & Services → OAuth consent screen**
-2. Click **Get started**, set App name to `NovaVoice`, pick your support email
+2. Click **Get started**, set App name to `AstraVoice`, pick your support email
 3. Audience: **External** → Next
 4. Add your email as Contact Information → Next → Finish → Create
 
 #### 5c. Add Yourself as a Test User
 1. Google Auth Platform → **Audience → + Add users**
-2. Enter the Gmail address whose calendar NovaVoice should manage
+2. Enter the Gmail address whose calendar AstraVoice should manage
 
 #### 5d. Add the Calendar Scope
 1. Google Auth Platform → **Data Access → Add or remove scopes**
@@ -173,7 +173,7 @@ python3 auth_server.py
 
 ---
 
-## Running NovaVoice
+## Running AstraVoice
 
 You need **two terminals** (both with the virtual environment active):
 
@@ -215,7 +215,7 @@ Live session itself.
 ### Try it
 
 Say something like:
-> "Hi! Can you check if my calendar is free tomorrow afternoon? If it is, please book a NovaVoice demo at 3 PM. My email is demo@example.com."
+> "Hi! Can you check if my calendar is free tomorrow afternoon? If it is, please book an AstraVoice demo at 3 PM. My email is demo@example.com."
 
 Watch the transcript, the tool cards, and your Google Calendar!
 
@@ -304,6 +304,6 @@ model calls — a harness that scores wrongly is worse than no harness.
 
 - [Gemini Live API overview](https://ai.google.dev/gemini-api/docs/live)
 - [Google AI Studio](https://aistudio.google.com)
-- [NovaVoice reference repo](https://github.com/coder-irwin/voice_ai_agents_using-Gemini_live_api)
+- [AstraVoice reference repo](https://github.com/coder-irwin/voice_ai_agents_using-Gemini_live_api)
 - [Google Calendar API Python quickstart](https://developers.google.com/calendar/api/quickstart/python)
 - [Using OAuth 2.0 to access Google APIs](https://developers.google.com/identity/protocols/oauth2)

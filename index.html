@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NovaVoice – Real-Time Voice AI Agent</title>
-  <meta name="description" content="NovaVoice: a real-time voice AI booking assistant powered by the Gemini Live API and Google Calendar." />
+  <title>AstraVoice – Real-Time Voice AI Agent</title>
+  <meta name="description" content="AstraVoice: a real-time voice AI booking assistant powered by the Gemini Live API and Google Calendar." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet" />
@@ -133,12 +133,116 @@
 
     #telemetry {
       border-top: 1px solid var(--rule);
-      padding: .95rem 1.25rem;
-      display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem 1rem;
+      padding: .85rem 1.15rem;
+      display: flex;
+      flex-direction: column;
+      gap: .7rem;
+      background: rgba(9, 6, 15, 0.55);
     }
-    .tm { display: flex; flex-direction: column; gap: .1rem; }
-    .tm .k { font-size: .66rem; color: var(--mist); }
-    .tm .v { font-family: 'Chakra Petch', sans-serif; font-size: 1.02rem; }
+
+    /* Pipeline Status Bar */
+    .pipeline-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .35rem .55rem;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: .65rem;
+      letter-spacing: .06em;
+    }
+    .pipe-step {
+      color: var(--mist);
+      padding: .15rem .35rem;
+      border-radius: 2px;
+      transition: all .18s ease;
+    }
+    .pipe-step.active-mic {
+      color: var(--ice);
+      background: rgba(107, 213, 255, 0.16);
+      text-shadow: 0 0 8px rgba(107, 213, 255, 0.6);
+    }
+    .pipe-step.active-model {
+      color: var(--flare);
+      background: rgba(255, 197, 77, 0.16);
+      text-shadow: 0 0 8px rgba(255, 197, 77, 0.6);
+    }
+    .pipe-step.active-tool {
+      color: var(--ember);
+      background: rgba(255, 107, 26, 0.18);
+      text-shadow: 0 0 8px rgba(255, 107, 26, 0.6);
+    }
+    .pipe-step.active-tts {
+      color: var(--plasma);
+      background: rgba(255, 61, 0, 0.18);
+      text-shadow: 0 0 8px rgba(255, 61, 0, 0.6);
+    }
+    .pipe-sep { color: var(--rule); font-size: .7rem; }
+
+    /* Telemetry Metrics Grid */
+    .tm-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: .55rem .75rem;
+    }
+    .tm { display: flex; flex-direction: column; gap: .05rem; min-width: 0; }
+    .tm .k { font-size: .62rem; color: var(--mist); text-transform: uppercase; letter-spacing: .05em; }
+    .tm .v { font-family: 'Chakra Petch', sans-serif; font-size: .92rem; color: var(--flare); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tm .v.ice { color: var(--ice); }
+    .tm .v.ember { color: var(--ember); }
+
+    /* Waterfall Breakdown Card */
+    .waterfall-box {
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      padding: .45rem .6rem;
+      background: rgba(255, 107, 26, 0.03);
+      display: flex;
+      flex-direction: column;
+      gap: .25rem;
+    }
+    .waterfall-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: .62rem;
+      color: var(--mist);
+      font-family: 'Chakra Petch', sans-serif;
+    }
+    .wf-total { color: var(--flare); font-weight: 600; }
+    .wf-bar {
+      display: flex;
+      height: 5px;
+      border-radius: 2px;
+      overflow: hidden;
+      background: var(--rule);
+      width: 100%;
+    }
+    .wf-seg-model {
+      height: 100%;
+      background: var(--flare);
+      width: 0%;
+      transition: width .3s ease;
+    }
+    .wf-seg-tool {
+      height: 100%;
+      background: var(--ember);
+      width: 0%;
+      transition: width .3s ease;
+    }
+    .wf-legend {
+      display: flex;
+      justify-content: space-between;
+      font-size: .60rem;
+      color: var(--mist);
+      font-family: 'IBM Plex Sans', sans-serif;
+    }
+    .wf-item { display: inline-flex; align-items: center; gap: .25rem; }
+    .wf-dot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+    .wf-dot.model { background: var(--flare); }
+    .wf-dot.tool { background: var(--ember); }
 
     /* ── Key dialog (AUTH_MODE 'key' only; hidden when ephemeral) ─ */
     #setup-modal {
@@ -209,7 +313,7 @@
 <div id="shell">
 
   <header id="rail">
-    <div class="mark">NOVA<span>VOICE</span></div>
+    <div class="mark">ASTRA<span>VOICE</span></div>
     <div class="rail-readouts">
       <div class="readout"><span class="k">link</span><span class="v dim" id="rv-link">offline</span></div>
       <div class="readout"><span class="k">reply</span><span class="v" id="rv-latency">—</span></div>
@@ -229,10 +333,39 @@
   <aside id="side">
     <div id="transcript" role="log" aria-live="polite"></div>
     <div id="telemetry">
-      <div class="tm"><span class="k">day</span><span class="v" id="tm-day">—</span></div>
-      <div class="tm"><span class="k">booked</span><span class="v" id="tm-busy">—</span></div>
-      <div class="tm"><span class="k">last action</span><span class="v" id="tm-tool">—</span></div>
-      <div class="tm"><span class="k">bridge</span><span class="v" id="tm-bridge">—</span></div>
+      <div class="pipeline-bar" id="pipeline-bar">
+        <span class="pipe-step" id="pipe-mic">MIC 16k</span>
+        <span class="pipe-sep">›</span>
+        <span class="pipe-step" id="pipe-model">GEMINI LIVE</span>
+        <span class="pipe-sep">›</span>
+        <span class="pipe-step" id="pipe-tool">TOOL BRIDGE</span>
+        <span class="pipe-sep">›</span>
+        <span class="pipe-step" id="pipe-tts">PCM 24k</span>
+      </div>
+
+      <div class="tm-grid">
+        <div class="tm"><span class="k">turn latency</span><span class="v ice" id="tm-ttfb">—</span></div>
+        <div class="tm"><span class="k">tool duration</span><span class="v ember" id="tm-bridge">—</span></div>
+        <div class="tm"><span class="k">barge-in</span><span class="v" id="tm-bargein">0</span></div>
+        <div class="tm"><span class="k">target day</span><span class="v" id="tm-day">—</span></div>
+        <div class="tm"><span class="k">calendar</span><span class="v" id="tm-busy">—</span></div>
+        <div class="tm"><span class="k">last tool</span><span class="v" id="tm-tool">—</span></div>
+      </div>
+
+      <div class="waterfall-box">
+        <div class="waterfall-header">
+          <span>LATENCY WATERFALL</span>
+          <span class="wf-total" id="wf-total">—</span>
+        </div>
+        <div class="wf-bar">
+          <div class="wf-seg-model" id="wf-seg-model" style="width: 0%"></div>
+          <div class="wf-seg-tool" id="wf-seg-tool" style="width: 0%"></div>
+        </div>
+        <div class="wf-legend">
+          <span class="wf-item"><span class="wf-dot model"></span> Model: <strong id="wf-lbl-model">—</strong></span>
+          <span class="wf-item"><span class="wf-dot tool"></span> Tool: <strong id="wf-lbl-tool">—</strong></span>
+        </div>
+      </div>
     </div>
   </aside>
 
@@ -504,7 +637,10 @@ function parseRanges(text) {
 // If the socket closes immediately after connecting, check this against the
 // models your key can actually use: GET http://127.0.0.1:5000/api/live_models
 const GEMINI_LIVE_MODEL = 'models/gemini-3.1-flash-live-preview';
-const BRIDGE_URL   = 'http://127.0.0.1:5000';
+// Dynamic origin: seamlessly works on local port 5000, port 8000 UI dev server, file:// fallback, and Cloud Run HTTPS URL
+const BRIDGE_URL   = (!window.location.origin || window.location.origin === 'null' || !window.location.origin.startsWith('http') || window.location.port === '8000')
+  ? 'http://127.0.0.1:5000'
+  : window.location.origin;
 // Leave empty unless BRIDGE_TOKEN is also set in .env.
 const BRIDGE_TOKEN = '';
 
@@ -514,9 +650,13 @@ const BRIDGE_TOKEN = '';
 const AUTH_MODE = 'ephemeral';
 
 // Ephemeral tokens are v1beta-only, so both modes use v1beta.
+// Ephemeral access_tokens route through BidiGenerateContentConstrained; direct API keys route through BidiGenerateContent.
 const LIVE_WS_BASE =
   'wss://generativelanguage.googleapis.com/ws/' +
   'google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+const LIVE_WS_CONSTRAINED_BASE =
+  'wss://generativelanguage.googleapis.com/ws/' +
+  'google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 
 const TOOL_ICONS = {
   check_availability:  '\u{1F50D}',
@@ -561,6 +701,43 @@ const tmDay      = document.getElementById('tm-day');
 const tmBusy     = document.getElementById('tm-busy');
 const tmTool     = document.getElementById('tm-tool');
 const tmBridge   = document.getElementById('tm-bridge');
+const tmTtfb     = document.getElementById('tm-ttfb');
+const tmBargein  = document.getElementById('tm-bargein');
+const pipeMic    = document.getElementById('pipe-mic');
+const pipeModel  = document.getElementById('pipe-model');
+const pipeTool   = document.getElementById('pipe-tool');
+const pipeTts    = document.getElementById('pipe-tts');
+const wfTotal    = document.getElementById('wf-total');
+const wfSegModel = document.getElementById('wf-seg-model');
+const wfSegTool  = document.getElementById('wf-seg-tool');
+const wfLblModel = document.getElementById('wf-lbl-model');
+const wfLblTool  = document.getElementById('wf-lbl-tool');
+
+let bargeInCount = 0;
+let lastToolMs = 0;
+
+function setPipelineStage(stage) {
+  if (!pipeMic) return;
+  pipeMic.className   = 'pipe-step' + (stage === 'mic'   ? ' active-mic'   : '');
+  pipeModel.className = 'pipe-step' + (stage === 'model' ? ' active-model' : '');
+  pipeTool.className  = 'pipe-step' + (stage === 'tool'  ? ' active-tool'  : '');
+  pipeTts.className   = 'pipe-step' + (stage === 'tts'   ? ' active-tts'   : '');
+}
+
+function updateWaterfall(totalTurnMs, toolMs) {
+  if (!totalTurnMs || totalTurnMs <= 0 || !wfTotal) return;
+  const toolTime = toolMs || 0;
+  const modelTime = Math.max(0, totalTurnMs - toolTime);
+
+  wfTotal.textContent = `${totalTurnMs} ms`;
+  wfLblModel.textContent = `${modelTime} ms`;
+  wfLblTool.textContent = toolTime ? `${toolTime} ms` : 'none';
+
+  const modelPct = Math.min(100, Math.round((modelTime / totalTurnMs) * 100));
+  const toolPct = Math.min(100, Math.round((toolTime / totalTurnMs) * 100));
+  wfSegModel.style.width = `${modelPct}%`;
+  wfSegTool.style.width = `${toolPct}%`;
+}
 
 // How a status maps to what the orb is doing. 'working' is set separately,
 // while a tool call is in flight.
@@ -586,7 +763,11 @@ let awaitingReply = false;  // true until the first audio of the agent's turn
 function noteReplyLatency() {
   if (!awaitingReply || !lastUserSpeechAt) return;
   awaitingReply = false;
-  rvLatency.textContent = `${Math.round(performance.now() - lastUserSpeechAt)} ms`;
+  const latency = Math.round(performance.now() - lastUserSpeechAt);
+  rvLatency.textContent = `${latency} ms`;
+  if (tmTtfb) tmTtfb.textContent = `${latency} ms`;
+  updateWaterfall(latency, lastToolMs);
+  setPipelineStage('tts');
 }
 
 /* Light the day dial from whatever the calendar just reported. */
@@ -702,6 +883,9 @@ function base64ToFloat32(b64, sampleRate = 24000) {
 
 function scheduleAudioChunk(float32Data, sampleRate = 24000) {
   if (!audioCtxOut) return;
+  if (audioCtxOut.state === 'suspended') {
+    try { audioCtxOut.resume(); } catch (_) {}
+  }
   const buffer = audioCtxOut.createBuffer(1, float32Data.length, sampleRate);
   buffer.copyToChannel(float32Data, 0);
 
@@ -802,6 +986,7 @@ async function handleMessage(raw) {
   if (msg.toolCall) {
     const responses = [];
     Orb.setState('working');
+    setPipelineStage('tool');
 
     for (const call of msg.toolCall.functionCalls) {
       addToolCard(call.name, call.args || {});
@@ -821,7 +1006,8 @@ async function handleMessage(raw) {
         if (!resp.ok) throw new Error(`bridge returned HTTP ${resp.status}`);
         const data = await resp.json();
         result = data.result;
-        tmBridge.textContent = `${Math.round(performance.now() - startedAt)} ms`;
+        lastToolMs = Math.round(performance.now() - startedAt);
+        tmBridge.textContent = `${lastToolMs} ms`;
       } catch (err) {
         result = `Error calling bridge: ${err.message}`;
         tmBridge.textContent = 'error';
@@ -839,6 +1025,7 @@ async function handleMessage(raw) {
     }
 
     Orb.setState('idle');
+    setPipelineStage('model');
 
     ws.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
     return;
@@ -852,6 +1039,9 @@ async function handleMessage(raw) {
     if (sc.interrupted) {
       stopAllPlayback();
       setStatus('listening', 'listening');
+      setPipelineStage('mic');
+      bargeInCount++;
+      if (tmBargein) tmBargein.textContent = String(bargeInCount);
       currentAgentBubble = null;
     }
 
@@ -859,6 +1049,7 @@ async function handleMessage(raw) {
     if (sc.turnComplete) {
       currentAgentBubble = null;
       currentUserBubble  = null;
+      setPipelineStage('ready');
     }
 
     // Output transcription (agent speech-to-text)
@@ -880,6 +1071,8 @@ async function handleMessage(raw) {
       currentUserBubble.textContent += sc.inputTranscription.text;
       lastUserSpeechAt = performance.now();
       awaitingReply = true;
+      lastToolMs = 0;
+      setPipelineStage('model');
       transcript.scrollTop = transcript.scrollHeight;
     }
 
@@ -911,7 +1104,11 @@ async function startCall() {
 
   // ── Mic ──
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    addMsg('Microphone API not available in this browser context. Please use Chrome on http://localhost:8000', 'system');
+    const isFrame = window.self !== window.top;
+    const msg = isFrame
+      ? 'Microphone API is disabled in embedded preview tabs. Please open an external Google Chrome window and navigate to: http://localhost:5000'
+      : 'Microphone API is unavailable. Please open an external Google Chrome or Edge window and navigate to: http://localhost:5000';
+    addMsg(msg, 'system');
     setStatus('no mic', '');
     callBtn.disabled = false;
     return;
@@ -948,6 +1145,14 @@ async function startCall() {
   playAnalyser.fftSize = 256;
   gainNode.connect(playAnalyser);
 
+  // Unsuspend audio contexts if the browser started them suspended
+  if (audioCtxIn.state === 'suspended') {
+    try { await audioCtxIn.resume(); } catch (_) {}
+  }
+  if (audioCtxOut.state === 'suspended') {
+    try { await audioCtxOut.resume(); } catch (_) {}
+  }
+
   // ── WebSocket ──
   let wsUrl;
   if (AUTH_MODE === 'ephemeral') {
@@ -962,7 +1167,7 @@ async function startCall() {
       callBtn.disabled = false;
       return;
     }
-    wsUrl = `${LIVE_WS_BASE}?access_token=${encodeURIComponent(token)}`;
+    wsUrl = `${LIVE_WS_CONSTRAINED_BASE}?access_token=${encodeURIComponent(token)}`;
   } else {
     wsUrl = `${LIVE_WS_BASE}?key=${encodeURIComponent(apiKey)}`;
   }
@@ -1014,6 +1219,7 @@ async function startCall() {
       }
     }));
     setStatus('listening', 'listening');
+    if (!awaitingReply) setPipelineStage('mic');
   };
 }
 
@@ -1040,14 +1246,14 @@ function endCall() {
 if (AUTH_MODE === 'ephemeral') {
   // No key is needed in the browser. Remove any key a previous version stored,
   // and hide the key UI so it cannot be reintroduced by habit.
-  try { localStorage.removeItem('novavoice_gemini_key'); } catch (_) {}
+  try { localStorage.removeItem('astravoice_gemini_key'); } catch (_) {}
   document.getElementById('setup-modal').style.display = 'none';
   document.getElementById('key-settings-btn').style.display = 'none';
   callBtn.disabled = false;
   setStatus('standby', 'ready');
   addMsg('Standing by. The API key stays on the server; this page gets a short-lived token per call.', 'system');
 } else {
-  const savedKey = localStorage.getItem('novavoice_gemini_key');
+  const savedKey = localStorage.getItem('astravoice_gemini_key');
   if (savedKey) {
     apiKey = savedKey;
     document.getElementById('api-key-input').value = savedKey;
@@ -1064,7 +1270,7 @@ document.getElementById('connect-btn').addEventListener('click', () => {
     return;
   }
   apiKey = key;
-  localStorage.setItem('novavoice_gemini_key', key);
+  localStorage.setItem('astravoice_gemini_key', key);
   document.getElementById('setup-modal').style.display = 'none';
   callBtn.disabled = false;
   setStatus('standby', 'ready');

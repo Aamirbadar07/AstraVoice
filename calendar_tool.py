@@ -37,7 +37,7 @@ except Exception:
 # ───────────────────────────── auth ─────────────────────────────
 
 def _save_token(creds) -> None:
-    """Persist (possibly refreshed) credentials back to token.json."""
+    """Persist (possibly refreshed) credentials back to token.json if writable."""
     data = {
         "token": creds.token,
         "refresh_token": creds.refresh_token,
@@ -46,20 +46,29 @@ def _save_token(creds) -> None:
         "client_secret": creds.client_secret,
         "scopes": list(creds.scopes) if creds.scopes else [],
     }
-    with open(TOKEN_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    try:
+        with open(TOKEN_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except OSError as exc:
+        print(f"[Calendar] Note: could not write refreshed token to disk: {exc}")
 
 
 def get_calendar_service():
-    """Load token.json, refresh it if stale, and return a Calendar v3 service."""
-    if not os.path.exists(TOKEN_FILE):
+    """Load token.json or GOOGLE_TOKEN_JSON env var, refresh if stale, and return a Calendar v3 service."""
+    token_env = os.getenv("GOOGLE_TOKEN_JSON")
+    if token_env:
+        try:
+            token_data = json.loads(token_env)
+        except Exception as exc:
+            raise ValueError(f"Failed to parse GOOGLE_TOKEN_JSON: {exc}")
+    elif os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE) as f:
+            token_data = json.load(f)
+    else:
         raise FileNotFoundError(
-            f"'{TOKEN_FILE}' not found. "
+            f"'{TOKEN_FILE}' not found and GOOGLE_TOKEN_JSON not set. "
             "Run auth_server.py first to complete the OAuth flow."
         )
-
-    with open(TOKEN_FILE) as f:
-        token_data = json.load(f)
 
     creds = Credentials(
         token=token_data.get("token"),
@@ -318,7 +327,7 @@ def propose_change(
 
             args = {
                 "date_time": date_time,
-                "title": title or "NovaVoice Demo",
+                "title": title or "AstraVoice Demo",
                 "guest_email": guest_email,
                 "duration_minutes": minutes,
             }
@@ -406,9 +415,15 @@ def book_meeting(confirmation_code: str) -> str:
 
         event = {
             "summary": args["title"],
-            "description": "Automated booking created via the NovaVoice voice agent.",
+            "description": "Automated booking created via the AstraVoice voice agent.",
             "start": {"dateTime": start_dt.isoformat(), "timeZone": HOST_TIMEZONE},
             "end": {"dateTime": end_dt.isoformat(), "timeZone": HOST_TIMEZONE},
+            "conferenceData": {
+                "createRequest": {
+                    "requestId": secrets.token_hex(8),
+                    "conferenceSolutionKey": {"type": "hangoutsMeet"},
+                }
+            },
         }
 
         guest_email = args.get("guest_email") or ""
@@ -417,19 +432,35 @@ def book_meeting(confirmation_code: str) -> str:
             event["attendees"] = [{"email": guest_email}]
             send_updates = "all"
 
-        created = (
-            service.events()
-            .insert(calendarId=HOST_CALENDAR_ID, body=event, sendUpdates=send_updates)
-            .execute()
-        )
+        try:
+            created = (
+                service.events()
+                .insert(
+                    calendarId=HOST_CALENDAR_ID,
+                    body=event,
+                    sendUpdates=send_updates,
+                    conferenceDataVersion=1,
+                )
+                .execute()
+            )
+        except Exception as insert_err:
+            print(f"[Calendar] Conference insert failed ({insert_err}), falling back to standard event")
+            event.pop("conferenceData", None)
+            created = (
+                service.events()
+                .insert(calendarId=HOST_CALENDAR_ID, body=event, sendUpdates=send_updates)
+                .execute()
+            )
 
         when = start_dt.strftime("%A %d %B at %H:%M")
-        print(f"[Calendar] Booked: {created.get('htmlLink', '(no link)')}")
+        meet_link = created.get("hangoutLink") or ""
+        print(f"[Calendar] Booked: {created.get('htmlLink', '(no link)')} | Meet: {meet_link or 'none'}")
 
         invited = f" An invite was emailed to {guest_email}." if send_updates == "all" else ""
+        meet_msg = f" Google Meet link attached: {meet_link}." if meet_link else ""
         return (
             f"Success! '{event['summary']}' is booked for {when}, "
-            f"{args['duration_minutes']} minutes.{invited} [id: {created.get('id', '')}]"
+            f"{args['duration_minutes']} minutes.{invited}{meet_msg} [id: {created.get('id', '')}]"
         )
 
     except Exception as exc:

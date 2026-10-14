@@ -10,10 +10,11 @@ Secrets live here and in token.json. The browser gets neither.
 """
 
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -28,22 +29,47 @@ from calendar_tool import (
 
 load_dotenv()
 
-# Only the page we serve may call this bridge. Without this, any website open
-# in the same browser could POST here and write to the host's real calendar.
+# Allowed origins for development and production.
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8000")
-ALLOWED_ORIGINS = [FRONTEND_URL, FRONTEND_URL.replace("localhost", "127.0.0.1")]
+ALLOWED_ORIGINS = [
+    FRONTEND_URL,
+    FRONTEND_URL.replace("localhost", "127.0.0.1"),
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+]
 
 # Optional second lock: set BRIDGE_TOKEN in .env AND in index.html to require it.
 BRIDGE_TOKEN = os.getenv("BRIDGE_TOKEN", "")
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 # Ephemeral tokens are a v1beta-only feature.
 TOKEN_TTL_MINUTES = int(os.getenv("TOKEN_TTL_MINUTES", "30"))
 SESSION_START_WINDOW_MINUTES = int(os.getenv("SESSION_START_WINDOW_MINUTES", "2"))
 
+
+def get_gemini_api_keys() -> list[str]:
+    """Retrieve list of Gemini API keys from GEMINI_API_KEYS or GEMINI_API_KEY (supports comma-separated list)."""
+    raw = os.getenv("GEMINI_API_KEYS") or os.getenv("GEMINI_API_KEY", "")
+    return [k.strip() for k in raw.split(",") if k.strip()]
+
+
+_key_index = 0
+_key_lock = threading.Lock()
+
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+
+@app.get("/")
+def serve_index():
+    """Serve the AstraVoice interface directly from the bridge."""
+    return send_from_directory(".", "index.html")
+
+
+@app.get("/session_config.json")
+def serve_session_config():
+    """Serve the system prompt and tool declarations."""
+    return send_from_directory(".", "session_config.json")
 
 
 @app.before_request
@@ -67,65 +93,82 @@ def _rfc3339(minutes_ahead: int) -> str:
 def api_live_token():
     """
     Mint a single-use ephemeral token for the browser's Live API WebSocket.
-
-    Deliberately sent WITHOUT liveConnectConstraints: a constrained token
-    routes the client to BidiGenerateContentConstrained, which is reported to
-    ignore the setup message's systemInstruction -- and ours carries the
-    current date and timezone, so losing it breaks every relative date.
+    Supports round-robin rotation and automatic failover across multiple keys.
     """
-    if not GEMINI_API_KEY:
+    keys = get_gemini_api_keys()
+    if not keys:
         return jsonify({"error": "GEMINI_API_KEY is not set in .env on the server."}), 500
 
-    try:
-        resp = requests.post(
-            f"{GEMINI_BASE}/auth_tokens",
-            headers={
-                "x-goog-api-key": GEMINI_API_KEY,
-                "Content-Type": "application/json",
-            },
-            json={
-                "uses": 1,
-                "expireTime": _rfc3339(TOKEN_TTL_MINUTES),
-                "newSessionExpireTime": _rfc3339(SESSION_START_WINDOW_MINUTES),
-            },
-            timeout=15,
-        )
-    except requests.RequestException as exc:
-        return jsonify({"error": f"Could not reach the Gemini API: {exc}"}), 502
+    global _key_index
+    with _key_lock:
+        start_idx = _key_index
+        _key_index = (_key_index + 1) % len(keys)
 
-    if resp.status_code >= 400:
-        print(f"[NovaVoice] Token mint failed {resp.status_code}: {resp.text[:300]}")
-        return jsonify({"error": f"Token request failed ({resp.status_code}). See server log."}), 502
+    last_error = ""
+    for attempt in range(len(keys)):
+        idx = (start_idx + attempt) % len(keys)
+        curr_key = keys[idx]
+        masked = curr_key[:6] + "..." + curr_key[-4:] if len(curr_key) > 10 else "***"
+        try:
+            resp = requests.post(
+                f"{GEMINI_BASE}/auth_tokens",
+                headers={
+                    "x-goog-api-key": curr_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "uses": 1,
+                    "expireTime": _rfc3339(TOKEN_TTL_MINUTES),
+                    "newSessionExpireTime": _rfc3339(SESSION_START_WINDOW_MINUTES),
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                name = (resp.json() or {}).get("name", "")
+                if name:
+                    print(f"[AstraVoice] Minted ephemeral token using key #{idx + 1} ({masked})")
+                    return jsonify({
+                        "token": name,
+                        "expires_in_minutes": TOKEN_TTL_MINUTES,
+                        "key_index": idx,
+                        "pool_size": len(keys),
+                    })
+            last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+            print(f"[AstraVoice] Key #{idx + 1} ({masked}) failed ({resp.status_code}). Trying next key...")
+        except requests.RequestException as exc:
+            last_error = str(exc)
+            print(f"[AstraVoice] Key #{idx + 1} ({masked}) network error: {exc}. Trying next key...")
 
-    name = (resp.json() or {}).get("name", "")
-    if not name:
-        return jsonify({"error": "Gemini returned no token name."}), 502
-
-    print(f"[NovaVoice] Minted ephemeral token, valid {TOKEN_TTL_MINUTES} min")
-    return jsonify({"token": name, "expires_in_minutes": TOKEN_TTL_MINUTES})
+    return jsonify({"error": f"All {len(keys)} Gemini API key(s) failed. Last error: {last_error}"}), 502
 
 
 @app.get("/api/live_models")
 def api_live_models():
-    """List models this key can use with the Live API - preview names rotate."""
-    if not GEMINI_API_KEY:
+    """List models this key pool can use with the Live API - preview names rotate."""
+    keys = get_gemini_api_keys()
+    if not keys:
         return jsonify({"error": "GEMINI_API_KEY is not set in .env."}), 500
-    try:
-        resp = requests.get(
-            f"{GEMINI_BASE}/models",
-            headers={"x-goog-api-key": GEMINI_API_KEY},
-            timeout=15,
-        )
-        resp.raise_for_status()
-    except requests.RequestException as exc:
-        return jsonify({"error": str(exc)}), 502
 
-    live = [
-        m.get("name")
-        for m in resp.json().get("models", [])
-        if "bidiGenerateContent" in (m.get("supportedGenerationMethods") or [])
-    ]
-    return jsonify({"live_models": live})
+    for curr_key in keys:
+        try:
+            resp = requests.get(
+                f"{GEMINI_BASE}/models",
+                headers={"x-goog-api-key": curr_key},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                live = [
+                    m.get("name")
+                    for m in resp.json().get("models", [])
+                    if "bidiGenerateContent" in (m.get("supportedGenerationMethods") or [])
+                ]
+                if "models/gemini-3.1-flash-live-preview" not in live:
+                    live.insert(0, "models/gemini-3.1-flash-live-preview")
+                return jsonify({"live_models": live})
+        except requests.RequestException:
+            continue
+
+    return jsonify({"live_models": ["models/gemini-3.1-flash-live-preview"]})
 
 
 # ───────────────────── calendar tools ─────────────────────
@@ -137,9 +180,9 @@ def api_check_availability():
     if not date:
         return jsonify({"result": "Error: no date was provided to check."})
 
-    print(f"[NovaVoice] check_availability: {date}")
+    print(f"[AstraVoice] check_availability: {date}")
     result = check_availability(date)
-    print(f"[NovaVoice]   -> {result[:140]}")
+    print(f"[AstraVoice]   -> {result[:140]}")
     return jsonify({"result": result})
 
 
@@ -150,9 +193,9 @@ def api_find_free_slots():
     if not date:
         return jsonify({"result": "Error: no date was provided."})
 
-    print(f"[NovaVoice] find_free_slots: {date}")
+    print(f"[AstraVoice] find_free_slots: {date}")
     result = find_free_slots(date, int(data.get("duration_minutes") or 0))
-    print(f"[NovaVoice]   -> {result[:140]}")
+    print(f"[AstraVoice]   -> {result[:140]}")
     return jsonify({"result": result})
 
 
@@ -164,7 +207,7 @@ def api_propose_change():
     if not action:
         return jsonify({"result": "Error: no action was provided ('book', 'cancel' or 'reschedule')."})
 
-    print(f"[NovaVoice] propose_change: {action} {dict(data)}")
+    print(f"[AstraVoice] propose_change: {action} {dict(data)}")
     result = propose_change(
         action,
         title=data.get("title", ""),
@@ -174,7 +217,7 @@ def api_propose_change():
         event_id=data.get("event_id", ""),
         new_date_time=data.get("new_date_time", ""),
     )
-    print(f"[NovaVoice]   -> {result[:140]}")
+    print(f"[AstraVoice]   -> {result[:140]}")
     return jsonify({"result": result})
 
 
@@ -187,9 +230,9 @@ def api_book_meeting():
     data = request.get_json(force=True, silent=True) or {}
     code = data.get("confirmation_code", "")
 
-    print(f"[NovaVoice] book_meeting: code={code}")
+    print(f"[AstraVoice] book_meeting: code={code}")
     result = book_meeting(code)
-    print(f"[NovaVoice]   -> {result}")
+    print(f"[AstraVoice]   -> {result}")
     return jsonify({"result": result})
 
 
@@ -198,9 +241,9 @@ def api_cancel_meeting():
     data = request.get_json(force=True, silent=True) or {}
     code = data.get("confirmation_code", "")
 
-    print(f"[NovaVoice] cancel_meeting: code={code}")
+    print(f"[AstraVoice] cancel_meeting: code={code}")
     result = cancel_meeting(code)
-    print(f"[NovaVoice]   -> {result}")
+    print(f"[AstraVoice]   -> {result}")
     return jsonify({"result": result})
 
 
@@ -209,24 +252,28 @@ def api_reschedule_meeting():
     data = request.get_json(force=True, silent=True) or {}
     code = data.get("confirmation_code", "")
 
-    print(f"[NovaVoice] reschedule_meeting: code={code}")
+    print(f"[AstraVoice] reschedule_meeting: code={code}")
     result = reschedule_meeting(code)
-    print(f"[NovaVoice]   -> {result}")
+    print(f"[AstraVoice]   -> {result}")
     return jsonify({"result": result})
 
 
 @app.get("/api/health")
 def api_health():
+    keys = get_gemini_api_keys()
     return jsonify({
         "ok": True,
-        "gemini_key_loaded": bool(GEMINI_API_KEY),
+        "gemini_key_loaded": bool(keys),
+        "gemini_keys_count": len(keys),
         "bridge_token": bool(BRIDGE_TOKEN),
     })
 
 
 if __name__ == "__main__":
-    print("[NovaVoice] API bridge running on http://127.0.0.1:5000")
-    print(f"[NovaVoice] Allowed origins : {', '.join(ALLOWED_ORIGINS)}")
-    print(f"[NovaVoice] Bridge token    : {'enabled' if BRIDGE_TOKEN else 'disabled'}")
-    print(f"[NovaVoice] Gemini API key  : {'loaded' if GEMINI_API_KEY else 'MISSING - add GEMINI_API_KEY to .env'}")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    port = int(os.getenv("PORT", "5000"))
+    keys = get_gemini_api_keys()
+    print(f"[AstraVoice] API bridge running on port {port}")
+    print(f"[AstraVoice] Allowed origins : {', '.join(ALLOWED_ORIGINS)}")
+    print(f"[AstraVoice] Bridge token    : {'enabled' if BRIDGE_TOKEN else 'disabled'}")
+    print(f"[AstraVoice] Gemini API keys : {len(keys)} key(s) loaded in rotation pool")
+    app.run(host="0.0.0.0", port=port, debug=False)

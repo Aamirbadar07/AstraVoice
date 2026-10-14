@@ -43,7 +43,7 @@ def index():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>NovaVoice – Authorize Calendar</title>
+        <title>AstraVoice – Authorize Calendar</title>
         <style>
             body {{ font-family: sans-serif; display: flex; align-items: center;
                    justify-content: center; min-height: 100vh; margin: 0;
@@ -60,7 +60,7 @@ def index():
     <body>
         <div class="card">
             <h1>AI Calling Assistant</h1>
-            <p>NovaVoice needs access to your Google Calendar to check availability and book meetings.</p>
+            <p>AstraVoice needs access to your Google Calendar to check availability and book meetings.</p>
             <a class="btn" href="{auth_url}">Click here to Authorize Google Calendar</a>
         </div>
     </body>
@@ -91,7 +91,7 @@ def callback():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>NovaVoice – Authorized!</title>
+        <title>AstraVoice – Authorized!</title>
         <style>
             body { font-family: sans-serif; display: flex; align-items: center;
                    justify-content: center; min-height: 100vh; margin: 0;

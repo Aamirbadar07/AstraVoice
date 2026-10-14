@@ -1,4 +1,4 @@
-# NovaVoice — project context for Claude Code
+# AstraVoice — project context for Claude Code
 
 Real-time voice booking agent: Gemini Live API (browser WebSocket) + Google Calendar
 (Python bridge). Originally from the Google codelab *Build a Real-Time Voice AI Agent
