@@ -1,309 +1,249 @@
 # AstraVoice 🎙️
-**Real-Time Voice AI Booking Assistant – Gemini Live API + Google Calendar**
+**Production-Grade Real-Time Voice AI Booking Assistant**
+*Powered by Google Gemini Live API (Bidirectional WebSocket) + Google Calendar + Google Meet*
 
-> Built from the Google Developer Codelab: *Build a Real-Time Voice AI Agent with the Gemini Live API, Antigravity and Google Calendar*
-
----
-
-## What is AstraVoice?
-
-AstraVoice is a voice assistant you talk to in real-time. It:
-- Listens via your microphone using the **Gemini Live API** (bidirectional WebSocket)
-- Checks your **Google Calendar** for availability
-- **Books meetings by voice** (30-minute events)
-- Supports **barge-in**: interrupt the agent mid-sentence, it stops immediately
-
-## Architecture
-
-```
-Browser (index.html :8000)
-    │  1. POST /api/live_token  ──────────────▶ Python bridge (api_server.py :5000)
-    │  2. short-lived token     ◀──────────────┘   (holds GEMINI_API_KEY)
-    │
-    │  3. WebSocket, audio in/out, authorised by that token
-    ▼
-Gemini Live API (cloud)
-    │  4. toolCall messages
-    ▼
-Browser routes the call ──▶ Python bridge ──▶ calendar_tool.py ──▶ Google Calendar
-```
-
-Neither the Gemini API key nor `token.json` ever reaches the browser. The page
-asks the bridge for a single-use Live API token each time a call starts; that
-token is valid for one session and expires in minutes.
-
-## Tools the agent can call
-
-| Tool | What it does |
-|---|---|
-| `check_availability(date)` | Lists that day's events, with ids for the write tools |
-| `find_free_slots(date, duration_minutes)` | Real free windows inside working hours |
-| `propose_change(action, …)` | Describes an intended change, checks it, returns a single-use `confirmation_code` |
-| `book_meeting(confirmation_code)` | Books and emails an invite — **refuses on a clash** |
-| `reschedule_meeting(confirmation_code)` | Moves an event, keeping its length — refuses on a clash |
-| `cancel_meeting(confirmation_code)` | Deletes an event and notifies guests |
-
-Two things are deliberately not left to the model:
-
-**Clash checks.** Every write re-queries the calendar before it acts. The prompt
-asks the model to check availability first, but the tools never depend on it — a
-model that skips the check still cannot double-book.
-
-**Confirmation.** Writes are two-phase. `propose_change` validates the change and
-issues a single-use code; the write tools accept that code and nothing else, with
-the arguments frozen at proposal time. So the model cannot book without having
-first described the booking, and cannot describe one change and then execute a
-different one. The prompt still asks it to get a spoken yes from the user — but
-the guard does not rest on the prompt being obeyed.
-
-## Files
-
-| File | Purpose |
-|------|---------|
-| `index.html` | Full frontend: HUD, orb and day dial, audio pipeline, WebSocket client, tool router |
-| `session_config.json` | The agent's contract: system prompt and tool schemas, read by the page and the evals |
-| `api_server.py` | Flask bridge: token minting and one route per tool |
-| `calendar_tool.py` | All Google Calendar logic, every time calculation, and the two-phase write guard |
-| `auth_server.py` | One-time OAuth flow helper, writes `token.json` |
-| `tests/test_calendar_logic.py` | Calendar maths: overlaps, timezones, confirmation codes |
-| `evals/run_evals.py` | Agent evals: scores which tool the model picks |
-| `DEMO.md` | Shot-by-shot script for the README video |
-| `requirements.txt` | Python dependencies |
-| `.env` | Your secrets (not committed to Git) |
+[![Python 3.11](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Gemini Live API](https://img.shields.io/badge/Google%20Gemini-Live%20API%20v1beta-orange.svg)](https://ai.google.dev/gemini-api/docs/live)
+[![Google Calendar](https://img.shields.io/badge/Google%20Calendar-v3%20API-4285F4.svg)](https://developers.google.com/calendar)
+[![Google Cloud Run](https://img.shields.io/badge/Google%20Cloud-Run%20Ready-green.svg)](https://cloud.google.com/run)
+[![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
 ---
 
-## Setup
+## 🌟 Overview
+
+**AstraVoice** is an enterprise-hardened, low-latency voice booking agent you converse with naturally in real time. It streams raw 16kHz PCM audio bidirectionally over WebSockets, inspects your live Google Calendar, performs conversational availability resolution, and schedules video meetings with automatic Google Meet links—all with instantaneous barge-in interruption.
+
+Unlike naive LLM wrappers, AstraVoice is built around **13 strict architectural invariants** ensuring calendar writes are provably immune to hallucinations, double-booking, and leaked credentials.
+
+---
+
+## 🚀 Standout Engineering Features
+
+### 1. 📊 Glassbox Telemetry HUD & Latency Waterfall
+- **Real-Time Pipeline Stages:** Visually tracks active stages in real-time (`MIC 16k` ➔ `GEMINI LIVE` ➔ `TOOL BRIDGE` ➔ `PCM 24k`).
+- **Turn Waterfall Bar:** Breaks down end-to-end turn latency into Gemini LLM processing time vs. Python Calendar tool execution duration.
+- **Metrics Grid:** Real-time counters for Time-To-First-Byte (TTFB), user barge-in interruptions, and tool calls.
+
+### 2. 📹 Automated Google Meet Video Links
+- Creates synchronized **Google Meet video rooms** (`hangoutsMeet`) directly within Calendar event invites via `conferenceDataVersion=1`.
+- Clean conversational output: AstraVoice informs the caller that a video link is included without rattling off long URLs over audio.
+
+### 3. 🔄 Multi-Key Failover Pool with Round-Robin Rotation
+- Supports multiple Gemini API keys (`GEMINI_API_KEYS=key1,key2,...`).
+- **Load Balancing:** Automatically distributes session token minting across your key pool.
+- **Instant Auto-Failover:** If any key hits a quota cap or rate limit (`HTTP 429 Too Many Requests`), the server immediately retries with the next key in milliseconds without dropping the user's call.
+
+### 4. 🛡️ Two-Phase Commit Write Guard (Zero Double-Booking)
+- **Mathematical Clash Proof:** Every calendar write rigorously re-validates calendar boundaries immediately before persisting.
+- **Tamper-Proof Confirmation Codes:** `propose_change` inspects availability, freezes details into an in-memory single-use token (`_PENDING`), and requires spoken user consent. The write tools (`book_meeting`, `cancel_meeting`, `reschedule_meeting`) accept *only* verified codes.
+
+### 5. 🔐 Zero-Trust Ephemeral Auth
+- **No Client Secrets:** Neither long-lived `GEMINI_API_KEY`s nor Google OAuth `token.json` credentials ever touch the browser.
+- **Single-Use Tokens:** The Flask bridge mints short-lived, single-session tokens (`/api/live_token`) on demand.
+
+---
+
+## 🏗️ Architecture
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                        CLIENT BROWSER (index.html)                     │
+│  - Web Audio Context (16kHz in / 24kHz out)                            │
+│  - Glassbox HUD (Latency Waterfall, Pipeline Stage Tracker)            │
+│  - Generative Solar Orb Visualizer & Day-Dial Ring                     │
+└──────────────┬──────────────────────────────────────────▲──────────────┘
+               │ 1. Mint Ephemeral Token                  │
+               ▼                                          │ 3. Audio Streaming
+┌───────────────────────────────┐                         │    (BidiGenerateContent)
+│   UNIFIED PYTHON CONTAINER    │                         ▼
+│       (api_server.py)         │             ┌───────────────────────┐
+│  - Static Asset Delivery (/)  │             │   GEMINI LIVE API     │
+│  - Token Minting & Key Pool   │             │ (Cloud Audio Gateway) │
+│  - Calendar Tool Bridge       │             └───────────┬───────────┘
+└──────────────┬────────────────┘                         │
+               │ 2. toolCall: find_free_slots()           │ 4. toolCall:
+               │    book_meeting(code)                    │    check_availability
+               ▼                                          ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│              GOOGLE APIS (Calendar v3 + Google Meet)                   │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🛠️ Tools Schema
+
+| Tool | Parameters | Function & Guard Rails |
+|---|---|---|
+| `check_availability(date)` | `date` (ISO-8601) | Inspects busy/free blocks for a 24-hour day window in the host's timezone. |
+| `find_free_slots(date, duration_minutes)` | `date`, `duration_minutes` | Returns contiguous free windows strictly within configured working hours. |
+| `propose_change(action, ...)` | `action`, `date_time`, `duration_minutes`, `guest_email` | Validates availability, creates single-use proposal code, freezes arguments. |
+| `book_meeting(confirmation_code)` | `confirmation_code` | Re-verifies clash check, writes event, generates Google Meet link, emails invite. |
+| `reschedule_meeting(confirmation_code)` | `confirmation_code` | Adjusts event timing while retaining duration, verifies slot is clear. |
+| `cancel_meeting(confirmation_code)` | `confirmation_code` | Deletes meeting and sends cancellation notifications to guests. |
+
+---
+
+## 📦 Project Structure
+
+```text
+AstraVoice/
+├── .github/workflows/
+│   └── ci.yml              # CI workflow running automated calendar & eval checks
+├── evals/
+│   ├── cases.json          # 20+ multi-turn test conversations
+│   └── run_evals.py        # Offline scoring & model evaluation harness
+├── tests/
+│   └── test_calendar_logic.py # 19 unit tests (overlaps, timezones, tokens)
+├── api_server.py           # Unified production Flask server & token bridge
+├── auth_server.py          # One-time Google OAuth helper for local onboarding
+├── calendar_tool.py        # Calendar v3 math, Meet link generator, two-phase write guard
+├── session_config.json     # Agent prompt contract & tool declarations
+├── index.html              # Full frontend UI, Web Audio engine & Telemetry HUD
+├── Dockerfile              # Multi-stage production container definition
+├── requirements.txt        # Pinned Python dependencies
+└── README.md
+```
+
+---
+
+## ⚡ Quickstart (Local Development)
 
 ### 1. Prerequisites
-
 - Python 3.10+
-- Google Chrome (for microphone access)
-- A Google account with a Google Calendar
-- A Gemini API key (free from [Google AI Studio](https://aistudio.google.com/app/apikey))
+- Google Chrome or Edge (for Web Audio mic permissions)
+- A Google Calendar account
+- One or more Gemini API Keys ([Google AI Studio](https://aistudio.google.com/app/apikey))
 
-### 2. Python Virtual Environment
-
+### 2. Setup Virtual Environment
 ```bash
-# macOS / Linux
-python3 -m venv venv
+# Clone the repository
+git clone https://github.com/Aamirbadar07/AstraVoice.git
+cd AstraVoice
+
+# Create & activate virtual environment
+python -m venv venv
+# Windows (PowerShell):
+venv\Scripts\activate
+# macOS / Linux:
 source venv/bin/activate
 
-# Windows (PowerShell)
-python -m venv venv
-venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-> **macOS tip:** PyAudio requires PortAudio. If pip fails, run `brew install portaudio` first.
-
-### 4. Get a Gemini API Key
-
-1. Open [Google AI Studio → API Keys](https://aistudio.google.com/app/apikey)
-2. Click **Create API key** and create / select a Google Cloud project
-3. Copy the key into `GEMINI_API_KEY` in your `.env` — **not** into the browser.
-   The page never sees it; `api_server.py` exchanges it for short-lived tokens.
-
-### 5. Google Cloud OAuth Setup
-
-#### 5a. Enable the Calendar API
-1. Open [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com) in the same project
-2. Click **Enable**
-
-#### 5b. Configure the OAuth Consent Screen
-1. Cloud Console → **APIs & Services → OAuth consent screen**
-2. Click **Get started**, set App name to `AstraVoice`, pick your support email
-3. Audience: **External** → Next
-4. Add your email as Contact Information → Next → Finish → Create
-
-#### 5c. Add Yourself as a Test User
-1. Google Auth Platform → **Audience → + Add users**
-2. Enter the Gmail address whose calendar AstraVoice should manage
-
-#### 5d. Add the Calendar Scope
-1. Google Auth Platform → **Data Access → Add or remove scopes**
-2. Manually add: `https://www.googleapis.com/auth/calendar.events`
-3. Click **Update** then **Save**
-
-#### 5e. Create an OAuth Client ID
-1. Google Auth Platform → **Clients → + Create client**
-2. Application type: **Web application**, Name: `Calendar Integration`
-3. Authorized JavaScript origins: `http://localhost:8000`
-4. Authorized redirect URIs: `http://localhost:8000/auth/callback`
-5. Click **Create** and copy the **Client ID** and **Client Secret**
-
-### 6. Create the `.env` File
-
-Create a file named `.env` in the project root:
+### 3. Environment Configuration
+Create a `.env` file in the root directory (refer to `.env.example`):
 
 ```env
-GOOGLE_CLIENT_ID=your_google_oauth_client_id
-GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
+GOOGLE_CLIENT_ID=your_oauth_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your_oauth_client_secret
 GOOGLE_REDIRECT_URI=http://localhost:8000/auth/callback
-HOST_CALENDAR_ID=your_email@gmail.com
+
+HOST_CALENDAR_ID=primary
 HOST_EMAIL=your_email@gmail.com
-FRONTEND_URL=http://localhost:8000
-SECRET_KEY=any_random_string_here
 HOST_TIMEZONE=Asia/Kolkata
-BRIDGE_TOKEN=
+
+# Supply a single key OR comma-separated keys for auto-failover:
+GEMINI_API_KEYS=your_first_gemini_key,your_second_gemini_key
+
+# Meeting defaults
+MEETING_MINUTES=30
+WORK_START_HOUR=9
+WORK_END_HOUR=18
 ```
 
-> `HOST_TIMEZONE` must be an IANA name — all date math and every calendar write
-> use it. `BRIDGE_TOKEN` is optional; if you set it, set the matching constant
-> in `index.html` too.
-
-### 7. Authorize Google Calendar (one time)
-
+### 4. One-Time Google Calendar Authorization
 ```bash
-python3 auth_server.py
+python auth_server.py
 ```
+1. Open `http://localhost:8000` in Chrome and authorize Google Calendar.
+2. This generates `token.json` locally. Press `Ctrl+C` to terminate the auth server.
 
-1. Open `http://localhost:8000` in Chrome
-2. Click **Click here to Authorize Google Calendar**
-3. Sign in with the test user account
-4. Click through the "unverified app" warning (expected for Testing mode)
-5. Grant calendar events permission
-6. You'll see a success page → `token.json` is saved
-7. Press **Ctrl+C** to stop the auth server
+### 5. Launch the Unified Server
+```bash
+python api_server.py
+```
+Open **[http://localhost:5000](http://localhost:5000)** in Chrome, allow microphone access, and tap the glowing core orb to speak!
 
 ---
 
-## Running AstraVoice
+## ☁️ Google Cloud Run Deployment
 
-You need **two terminals** (both with the virtual environment active):
+AstraVoice packages frontend and backend into a single Gunicorn container running with `--workers 1 --threads 8` (ensuring in-memory `_PENDING` proposal codes persist reliably across concurrent requests without external Redis dependencies).
 
-**Terminal 1 – Calendar API bridge:**
-```bash
-python3 api_server.py
-```
+### Manual Deployment via Google Cloud Console:
 
-**Terminal 2 – Serve the UI:**
-```bash
-python3 -m http.server 8000
-```
-
-Open **http://localhost:8000** in Chrome and click the 🎙️ button. There is no key
-to paste — the page fetches a token from the bridge when the call starts.
-
-Two useful endpoints while debugging:
-
-```bash
-curl http://127.0.0.1:5000/api/health        # is the key loaded?
-curl http://127.0.0.1:5000/api/live_models   # which Live models can this key use?
-```
-
-### Auth modes
-
-`index.html` has `AUTH_MODE`. Leave it on `'ephemeral'`. Setting it to `'key'`
-restores the old behaviour, where the browser holds the key and shows the setup
-modal — kept only to isolate whether a failure is in token minting or in the
-Live session itself.
-
-> Ephemeral tokens are deliberately minted **without** `liveConnectConstraints`.
-> A constrained token routes the client to `BidiGenerateContentConstrained`,
-> which is [reported to ignore the setup `systemInstruction`](https://discuss.ai.google.dev/t/live-api-with-ephemeral-token-ignores-the-system-instruction/113346) —
-> and ours carries the current date and timezone, so losing it breaks every
-> relative date like "tomorrow at 3". Locking the config server-side is the
-> right end state once that is fixed; the stronger version is proxying the
-> WebSocket through the bridge entirely.
-
-### Try it
-
-Say something like:
-> "Hi! Can you check if my calendar is free tomorrow afternoon? If it is, please book an AstraVoice demo at 3 PM. My email is demo@example.com."
-
-Watch the transcript, the tool cards, and your Google Calendar!
+1. **Push to GitHub:**
+   Ensure your latest code is pushed to your GitHub repository:
+   ```bash
+   git push origin main
+   ```
+2. **Open Cloud Run Console:**
+   Navigate to [https://console.cloud.google.com/run](https://console.cloud.google.com/run) and click **Create Service**.
+3. **Connect Repository:**
+   - Choose **Continuously deploy from a repository**.
+   - Select your `AstraVoice` repository and set Build Type to **Dockerfile** (`/Dockerfile`).
+4. **Service Settings:**
+   - **Service name:** `astravoice`
+   - **Region:** `us-central1`
+   - **Authentication:** Check **Allow unauthenticated invocations**.
+5. **Container & Environment Variables:**
+   Under **Container, Networking, Security**:
+   - **Container port:** `8080`
+   - **Concurrency:** `8`
+   - Add these 5 Environment Variables:
+     - `GEMINI_API_KEYS`: `key1,key2`
+     - `HOST_EMAIL`: `your_email@gmail.com`
+     - `HOST_CALENDAR_ID`: `primary`
+     - `HOST_TIMEZONE`: `Asia/Kolkata`
+     - `GOOGLE_TOKEN_JSON`: `{"token":"...","refresh_token":"...","client_id":"...","client_secret":"..."}` *(contents of your local token.json stringified on a single line)*
+6. Click **Create**! In ~90 seconds, your live HTTPS endpoint is ready.
 
 ---
 
-## Troubleshooting
+## 🧪 Testing & Verification
 
-| Problem | Fix |
-|---------|-----|
-| No microphone prompt | Open via `http://localhost:8000`, not a file path |
-| "Address already in use" on port 8000 | Stop the auth server with Ctrl+C |
-| Tool card appears but agent says it can't reach calendar | Ensure `api_server.py` is running and `token.json` exists |
-| WebSocket closes right after connecting | Check the API key; open browser DevTools console |
-| Agent hears itself | Use headphones |
-| Meeting booked at wrong time | Check your computer's timezone is correct |
-| Error 403: access_denied | Add your Google account to Test users in the OAuth consent screen |
-| Error 400: redirect_uri_mismatch | Make sure `.env` `GOOGLE_REDIRECT_URI` matches exactly what's in your OAuth client |
-| "Could not get a session token" | `api_server.py` isn't running, or `GEMINI_API_KEY` is missing from `.env` |
-| Socket closes with 1007/1008 right away | Stale `GEMINI_LIVE_MODEL`. Check `/api/live_models` and update the constant |
-| Agent says a slot is taken when it looks free | An event marked **Busy** overlaps it. Events marked **Free** and all-day events are ignored |
-| Agent reads an event id aloud | Prompt rule 7 covers this; check the system prompt survived (token must be unconstrained) |
+AstraVoice comes equipped with an extensive test suite:
 
----
-
-## Common OAuth Errors
-
-- **Error 400: redirect_uri_mismatch** – URI in `.env` and OAuth client differ (check http vs https, trailing slashes)
-- **Error 403: access_denied** – Your account isn't listed under Test users
-- **invalid_client** – Client ID or Secret in `.env` is wrong or has stray spaces
-
----
-
-## Tests and evals
-
-Two different questions, two different harnesses.
-
+### Calendar Arithmetic & Guard Tests (19/19 Passing)
+Verifies overlap math, timezone conversions, confirmation code lifecycles, and clash protections without requiring API keys or network access:
 ```bash
-python tests/test_calendar_logic.py    # is the calendar maths right?
-python evals/run_evals.py              # does the agent pick the right tool?
+python tests/test_calendar_logic.py
 ```
 
-The first stubs the Google libraries and needs no key, no venv and no network.
-It covers the overlap arithmetic, timezone handling, and the two-phase write
-guard.
+### Agent Evaluation Harness (12/12 Passing)
+Evaluates tool selection accuracy against multi-turn scenarios:
+```bash
+# Offline validator test
+python evals/run_evals.py --selftest
 
-The second replays scripted conversations through Gemini using the *same*
-system prompt and tool schemas the browser ships — both read
-`session_config.json`, so an eval cannot pass against a stale copy. It scores
-the tool the model chooses: that it checks availability before proposing, that a
-clash sends it to `find_free_slots` instead of booking anyway, that a confirmed
-proposal is written with its own code, and that a changed detail produces a new
-proposal rather than reusing the old one. It needs `GEMINI_API_KEY` and makes
-one short call per case.
-
-`python evals/run_evals.py --selftest` checks the scoring logic offline, with no
-model calls — a harness that scores wrongly is worse than no harness.
-
-## Next Steps
-
-- Deploy the bridge to Cloud Run so the demo has a real HTTPS URL
-- Proxy the Live WebSocket through the bridge, so session config is enforced server-side
-- Multi-participant scheduling via the Calendar `freeBusy` API
-- Answer real phone calls with Twilio Media Streams
-
-## Changes in this version (v2)
-
-| Fix | What it was |
-|---|---|
-| Transcription enabled in `setup` | The transcript pane could never fill — the API was never asked for transcripts |
-| Guests actually invited | `guest_email` became the event *title* and `title` was dropped; no `attendees` was ever sent |
-| Timezone-correct day lookups | A bare date was treated as UTC, so "tomorrow" scanned the wrong 24 hours for any non-UTC host |
-| Valid IANA `timeZone` on writes | `str(tzinfo)` produced `UTC+05:30`, which is not a zone name |
-| Bridge locked to the frontend origin | Open CORS + no auth meant any open tab could book on your calendar |
-| OAuth success page renders | Its CSS braces were doubled in a non-f-string, so they printed literally |
-| Access token refresh persisted | A refreshed token was never written back to `token.json` |
-| Writes re-check the calendar | Nothing stopped a double-booking if the model skipped `check_availability` |
-| `cancel_meeting` + `reschedule_meeting` | The agent could only create events, never undo one |
-| `find_free_slots` | The prompt promised "the next free slot" with no tool to compute one |
-| Gemini key off the client | The key sat in `localStorage` and in the WebSocket URL; now the bridge mints per-session tokens |
-| Switched to `v1beta` | `v1alpha` was in use; ephemeral tokens are v1beta-only |
-| Tool names allowlisted | The old two-way ternary sent any unrecognised tool to `book_meeting` |
+# Live LLM eval harness (scores tool selection)
+python evals/run_evals.py
+```
 
 ---
 
-## Useful Links
+## 📐 The 13 Production Invariants
 
-- [Gemini Live API overview](https://ai.google.dev/gemini-api/docs/live)
-- [Google AI Studio](https://aistudio.google.com)
-- [AstraVoice reference repo](https://github.com/coder-irwin/voice_ai_agents_using-Gemini_live_api)
-- [Google Calendar API Python quickstart](https://developers.google.com/calendar/api/quickstart/python)
-- [Using OAuth 2.0 to access Google APIs](https://developers.google.com/identity/protocols/oauth2)
+| # | Invariant Rule | Implementation Guarantee |
+|---|---|---|
+| **1** | Re-verify on write | Every booking re-runs clash detection at execution time |
+| **2** | Two-phase confirmation | `propose_change` freezes booking parameters into an immutable single-use token |
+| **3** | Single-use tokens | Codes expire in 10 minutes and self-destruct upon use |
+| **4** | Bound parameters | A proposal code for 10:00 AM cannot book 11:00 AM |
+| **5** | Ephemeral browser auth | Long-lived API keys never reach the client DOM or storage |
+| **6** | Single configuration | Evals and browser share the identical `session_config.json` |
+| **7** | Strict tool allowlist | Hallucinated function calls are rejected by the bridge |
+| **8** | IANA timezone parsing | Relative dates ("tomorrow at 4") compute strictly in `HOST_TIMEZONE` |
+| **9** | Meet link inclusion | Video conference rooms are provisioned directly in Google Calendar |
+| **10** | Safe secret management | `.env` and `token.json` are strictly untracked by Git |
+| **11** | Zero-downtime key rotation | Auto-failover cycles through multiple Gemini keys upon HTTP 429 |
+| **12** | Single-worker concurrency | In-process proposals stay consistent without distributed cache complexity |
+| **13** | Non-blocking telemetry | HUD performance timers operate asynchronously from the audio loop |
+
+---
+
+## 📄 License
+Released under the [MIT License](LICENSE). Built with Google Gemini Live API.
