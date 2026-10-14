@@ -2,7 +2,7 @@
 
 A 60-second take for the README. The point is not to show a pretty orb — it is
 to show the agent **refusing to do the wrong thing**, twice, out loud. That is
-the part a reviewer has not seen in forty other codelab forks.
+the part a reviewer has not seen in standard toy voice projects.
 
 ## Before you press record
 
