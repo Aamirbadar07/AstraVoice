@@ -11,6 +11,10 @@
 > ⚡ **Live Production Deployment:** [https://astravoice-953498911400.us-central1.run.app](https://astravoice-953498911400.us-central1.run.app)  
 > 📘 **Interactive Recruiter Guide:** [DEMO.md](DEMO.md) · **Technical Whitepaper:** [RECRUITER_TECHNICAL_REVIEW.md](RECRUITER_TECHNICAL_REVIEW.md)
 
+<p align="center">
+  <img src="docs/assets/astravoice_ui_preview.jpg" alt="AstraVoice Live Interface & Telemetry HUD" width="850">
+</p>
+
 ---
 
 ## 🌟 Overview
