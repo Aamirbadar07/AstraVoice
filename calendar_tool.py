@@ -10,6 +10,7 @@ double-book.
 import os
 import json
 import secrets
+import threading
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -259,21 +260,24 @@ def find_free_slots(date_iso: str, duration_minutes: int = 0) -> str:
 # that created it.
 PROPOSAL_TTL_SECONDS = 300
 _PENDING = {}
+_pending_lock = threading.Lock()
 
 
 def _issue(action: str, args: dict) -> str:
     """Store a proposal and return its one-time code."""
     now = time.monotonic()
-    for stale in [k for k, (_, _, exp) in _PENDING.items() if exp < now]:
-        _PENDING.pop(stale, None)  # keep the dict from growing without bound
-    code = secrets.token_hex(4)
-    _PENDING[code] = (action, args, now + PROPOSAL_TTL_SECONDS)
-    return code
+    with _pending_lock:
+        for stale in [k for k, (_, _, exp) in _PENDING.items() if exp < now]:
+            _PENDING.pop(stale, None)  # keep the dict from growing without bound
+        code = secrets.token_hex(4)
+        _PENDING[code] = (action, args, now + PROPOSAL_TTL_SECONDS)
+        return code
 
 
 def _consume(code: str, expect: str):
     """Pop a proposal. Returns (args, None) on success, (None, message) otherwise."""
-    entry = _PENDING.pop((code or "").strip(), None)
+    with _pending_lock:
+        entry = _PENDING.pop((code or "").strip(), None)
     if not entry:
         return None, (
             "Refused: no pending proposal with that code. Call propose_change first, "

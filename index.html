@@ -1132,6 +1132,7 @@ async function startCall() {
   micAnalyser.fftSize = 256;
   source.connect(micAnalyser);
 
+  // ponytail: ScriptProcessorNode (1024 frames = ~64ms at 16kHz) chosen for zero-build, single-file distribution without external worklet bundle assets. Upgrade path for high-CPU tabs: AudioWorkletNode with SharedArrayBuffer.
   scriptProcessor = audioCtxIn.createScriptProcessor(1024, 1, 1);
   source.connect(scriptProcessor);
   scriptProcessor.connect(audioCtxIn.destination);
