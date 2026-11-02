@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: astravoice
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: ENFORCE_FUTURE_DATES
+        value: "true"
+      - key: PROPOSAL_TTL_SECONDS
+        value: "300"
+      - key: GEMINI_API_KEYS
+        sync: false
+      - key: GOOGLE_TOKEN_JSON
+        sync: false
