@@ -1,8 +1,8 @@
 """
-generate_cloudrun_token.py - Helper to format token.json for Cloud Run GOOGLE_TOKEN_JSON.
+generate_cloudrun_token.py - Helper to format token.json for Cloud Deployments (Render / Cloud Run).
 
-Outputs the minified, single-line stringified JSON required for the Cloud Run
-environment variable GOOGLE_TOKEN_JSON.
+Outputs the minified, single-line stringified JSON required for the cloud environment
+variable GOOGLE_TOKEN_JSON.
 """
 
 import os
@@ -22,7 +22,7 @@ def main():
     # Minify into single-line string
     minified = json.dumps(data, separators=(",", ":"))
     print("\n" + "=" * 60)
-    print("  GOOGLE_TOKEN_JSON (Minified Single-Line for Cloud Run)")
+    print("  GOOGLE_TOKEN_JSON (Minified Single-Line for Cloud Deployments)")
     print("=" * 60 + "\n")
     print(minified)
     print("\n" + "=" * 60)

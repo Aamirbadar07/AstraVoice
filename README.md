@@ -229,11 +229,18 @@ Open **[http://localhost:5000](http://localhost:5000)** in Chrome, allow microph
 
 ---
 
-## ☁️ Google Cloud Run Deployment
+## ☁️ Production Cloud Deployment
 
+### 1. Render.com 24/7 Managed Cloud (Active Production Target)
+AstraVoice includes a turnkey [`render.yaml`](render.yaml) specification for 1-click cloud container hosting on Render.com:
+1. Connect your GitHub repository ([`Aamirbadar07/AstraVoice`](https://github.com/Aamirbadar07/AstraVoice)) to [Render.com](https://render.com).
+2. Render automatically builds the Docker container and connects to the native `/health` probe.
+3. Configure `GEMINI_API_KEYS` and `GOOGLE_TOKEN_JSON` in the Render Environment Dashboard.
+4. AstraVoice is immediately live 24/7 worldwide at **[https://astravoice.onrender.com](https://astravoice.onrender.com)**.
+
+### 2. Google Cloud Run (Alternative GCP Enterprise Target)
 AstraVoice packages frontend and backend into a single container running with `--workers 1 --threads 8` (ensuring in-memory `_PENDING` proposal codes persist reliably across concurrent requests without external Redis dependencies).
 
-### Direct Deploy via Google Cloud CLI:
 ```bash
 gcloud run deploy astravoice \
   --source . \
@@ -248,7 +255,7 @@ gcloud run deploy astravoice \
   --set-env-vars='GOOGLE_TOKEN_JSON={"token":"...","refresh_token":"...","client_id":"...","client_secret":"..."}'
 ```
 
-Refer to **[docs/DEPLOYMENT_STATUS.md](docs/DEPLOYMENT_STATUS.md)** for full Cloud Run troubleshooting details.
+Refer to **[docs/DEPLOYMENT_STATUS.md](docs/DEPLOYMENT_STATUS.md)** for full infrastructure verification details.
 
 ---
 
