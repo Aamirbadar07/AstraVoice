@@ -26,5 +26,8 @@ jobs:
       - name: Run calendar logic tests
         run: python tests/test_calendar_logic.py
 
+      - name: Run enterprise test suite
+        run: python tests/test_enterprise_suite.py
+
       - name: Run eval harness self-test
         run: python evals/run_evals.py --selftest

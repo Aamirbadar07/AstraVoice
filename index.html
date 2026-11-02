@@ -636,7 +636,7 @@ function parseRanges(text) {
 ═══════════════════════════════════════════════════════════════════ */
 // If the socket closes immediately after connecting, check this against the
 // models your key can actually use: GET http://127.0.0.1:5000/api/live_models
-const GEMINI_LIVE_MODEL = 'models/gemini-3.1-flash-live-preview';
+let GEMINI_LIVE_MODEL = 'models/gemini-3.1-flash-live-preview';
 // Dynamic origin: seamlessly works on local port 5000, port 8000 UI dev server, file:// fallback, and Cloud Run HTTPS URL
 const BRIDGE_URL   = (!window.location.origin || window.location.origin === 'null' || !window.location.origin.startsWith('http') || window.location.port === '8000')
   ? 'http://127.0.0.1:5000'
@@ -926,10 +926,23 @@ let TOOL_ENDPOINTS = new Set();
 
 async function loadSessionConfig() {
   if (SESSION_CONFIG) return SESSION_CONFIG;
-  const resp = await fetch('session_config.json', { cache: 'no-store' });
+  const resp = await fetch(`${BRIDGE_URL}/session_config.json`, { cache: 'no-store' });
   if (!resp.ok) throw new Error(`session_config.json returned HTTP ${resp.status}`);
   SESSION_CONFIG = await resp.json();
   TOOL_ENDPOINTS = new Set(SESSION_CONFIG.functionDeclarations.map(d => d.name));
+
+  // Dynamically resolve the live model supported by the bridge key pool
+  try {
+    const mResp = await fetch(`${BRIDGE_URL}/api/live_models`);
+    if (mResp.ok) {
+      const mData = await mResp.json();
+      if (mData.live_models && mData.live_models.length > 0) {
+        GEMINI_LIVE_MODEL = mData.live_models[0];
+        console.log(`[AstraVoice] Active Live Model resolved: ${GEMINI_LIVE_MODEL}`);
+      }
+    }
+  } catch (_) {}
+
   return SESSION_CONFIG;
 }
 

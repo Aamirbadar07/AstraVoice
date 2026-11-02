@@ -1,12 +1,12 @@
 """
-api_server.py - Flask bridge (port 5000).
+api_server.py - Flask bridge (port 5000 / Cloud Run port 8080).
 
 Two jobs:
   1. Mint short-lived Live API tokens, so the long-lived GEMINI_API_KEY stays
      on this machine and never reaches the browser.
   2. Serve the calendar tools the browser calls on toolCall messages.
 
-Secrets live here and in token.json. The browser gets neither.
+Secrets live here and in token.json (or GOOGLE_TOKEN_JSON). The browser gets neither.
 """
 
 import os
@@ -19,6 +19,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 
 from calendar_tool import (
+    TOKEN_FILE,
     book_meeting,
     cancel_meeting,
     check_availability,
@@ -31,14 +32,23 @@ load_dotenv()
 
 # Allowed origins for development and production.
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8000")
-ALLOWED_ORIGINS = [
+DEFAULT_ALLOWED_ORIGINS = [
     FRONTEND_URL,
     FRONTEND_URL.replace("localhost", "127.0.0.1"),
     "http://localhost:5000",
     "http://127.0.0.1:5000",
 ]
 
-# Optional second lock: set BRIDGE_TOKEN in .env AND in index.html to require it.
+# Configurable CORS origins via CORS_ORIGINS (comma-separated), defaults to DEFAULT_ALLOWED_ORIGINS
+custom_cors = os.getenv("CORS_ORIGINS", "").strip()
+if custom_cors == "*":
+    ALLOWED_ORIGINS = "*"
+elif custom_cors:
+    ALLOWED_ORIGINS = [o.strip() for o in custom_cors.split(",") if o.strip()]
+else:
+    ALLOWED_ORIGINS = DEFAULT_ALLOWED_ORIGINS
+
+# Optional shared secret for the API bridge.
 BRIDGE_TOKEN = os.getenv("BRIDGE_TOKEN", "")
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -53,11 +63,19 @@ def get_gemini_api_keys() -> list[str]:
     return [k.strip() for k in raw.split(",") if k.strip()]
 
 
+def _safe_int(val, default: int = 0) -> int:
+    """Safely cast string/number input to integer without raising ValueError."""
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
 _key_index = 0
 _key_lock = threading.Lock()
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 
 
 @app.get("/")
@@ -72,9 +90,32 @@ def serve_session_config():
     return send_from_directory(".", "session_config.json")
 
 
+@app.get("/health")
+@app.get("/api/health")
+def api_health():
+    """
+    Lightweight health check for Cloud Run and monitoring systems.
+    Executes in <1ms without third-party network calls or secret exposure.
+    """
+    keys = get_gemini_api_keys()
+    has_calendar = bool(os.getenv("GOOGLE_TOKEN_JSON") or os.path.exists(TOKEN_FILE))
+    return jsonify({
+        "status": "healthy",
+        "ok": True,
+        "gemini_key_loaded": bool(keys),
+        "gemini_keys_count": len(keys),
+        "calendar_configured": has_calendar,
+        "bridge_token": bool(BRIDGE_TOKEN),
+    }), 200
+
+
 @app.before_request
 def require_bridge_token():
+    """Enforce optional BRIDGE_TOKEN header while exempting public assets and health probes."""
     if request.method == "OPTIONS" or not BRIDGE_TOKEN:
+        return None
+    # Public assets and health endpoints must remain accessible without headers
+    if request.path in ("/", "/health", "/api/health", "/session_config.json"):
         return None
     if request.headers.get("X-Bridge-Token") != BRIDGE_TOKEN:
         return jsonify({"result": "Rejected: bad or missing bridge token."}), 401
@@ -176,7 +217,7 @@ def api_live_models():
 @app.post("/api/check_availability")
 def api_check_availability():
     data = request.get_json(force=True, silent=True) or {}
-    date = data.get("date", "")
+    date = str(data.get("date", "")).strip()
     if not date:
         return jsonify({"result": "Error: no date was provided to check."})
 
@@ -189,12 +230,13 @@ def api_check_availability():
 @app.post("/api/find_free_slots")
 def api_find_free_slots():
     data = request.get_json(force=True, silent=True) or {}
-    date = data.get("date", "")
+    date = str(data.get("date", "")).strip()
     if not date:
         return jsonify({"result": "Error: no date was provided."})
 
-    print(f"[AstraVoice] find_free_slots: {date}")
-    result = find_free_slots(date, int(data.get("duration_minutes") or 0))
+    duration = _safe_int(data.get("duration_minutes"), 0)
+    print(f"[AstraVoice] find_free_slots: {date} (duration: {duration}m)")
+    result = find_free_slots(date, duration)
     print(f"[AstraVoice]   -> {result[:140]}")
     return jsonify({"result": result})
 
@@ -203,19 +245,20 @@ def api_find_free_slots():
 def api_propose_change():
     """Phase one of every write: describe the change, get a one-time code."""
     data = request.get_json(force=True, silent=True) or {}
-    action = data.get("action", "")
+    action = str(data.get("action", "")).strip().lower()
     if not action:
         return jsonify({"result": "Error: no action was provided ('book', 'cancel' or 'reschedule')."})
 
+    duration = _safe_int(data.get("duration_minutes"), 0)
     print(f"[AstraVoice] propose_change: {action} {dict(data)}")
     result = propose_change(
         action,
-        title=data.get("title", ""),
-        date_time=data.get("date_time", ""),
-        guest_email=data.get("guest_email", ""),
-        duration_minutes=int(data.get("duration_minutes") or 0),
-        event_id=data.get("event_id", ""),
-        new_date_time=data.get("new_date_time", ""),
+        title=str(data.get("title", "")).strip(),
+        date_time=str(data.get("date_time", "")).strip(),
+        guest_email=str(data.get("guest_email", "")).strip(),
+        duration_minutes=duration,
+        event_id=str(data.get("event_id", "")).strip(),
+        new_date_time=str(data.get("new_date_time", "")).strip(),
     )
     print(f"[AstraVoice]   -> {result[:140]}")
     return jsonify({"result": result})
@@ -228,7 +271,7 @@ def api_propose_change():
 @app.post("/api/book_meeting")
 def api_book_meeting():
     data = request.get_json(force=True, silent=True) or {}
-    code = data.get("confirmation_code", "")
+    code = str(data.get("confirmation_code", "")).strip()
 
     print(f"[AstraVoice] book_meeting: code={code}")
     result = book_meeting(code)
@@ -239,7 +282,7 @@ def api_book_meeting():
 @app.post("/api/cancel_meeting")
 def api_cancel_meeting():
     data = request.get_json(force=True, silent=True) or {}
-    code = data.get("confirmation_code", "")
+    code = str(data.get("confirmation_code", "")).strip()
 
     print(f"[AstraVoice] cancel_meeting: code={code}")
     result = cancel_meeting(code)
@@ -250,7 +293,7 @@ def api_cancel_meeting():
 @app.post("/api/reschedule_meeting")
 def api_reschedule_meeting():
     data = request.get_json(force=True, silent=True) or {}
-    code = data.get("confirmation_code", "")
+    code = str(data.get("confirmation_code", "")).strip()
 
     print(f"[AstraVoice] reschedule_meeting: code={code}")
     result = reschedule_meeting(code)
@@ -258,22 +301,11 @@ def api_reschedule_meeting():
     return jsonify({"result": result})
 
 
-@app.get("/api/health")
-def api_health():
-    keys = get_gemini_api_keys()
-    return jsonify({
-        "ok": True,
-        "gemini_key_loaded": bool(keys),
-        "gemini_keys_count": len(keys),
-        "bridge_token": bool(BRIDGE_TOKEN),
-    })
-
-
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     keys = get_gemini_api_keys()
     print(f"[AstraVoice] API bridge running on port {port}")
-    print(f"[AstraVoice] Allowed origins : {', '.join(ALLOWED_ORIGINS)}")
+    print(f"[AstraVoice] Allowed origins : {ALLOWED_ORIGINS}")
     print(f"[AstraVoice] Bridge token    : {'enabled' if BRIDGE_TOKEN else 'disabled'}")
     print(f"[AstraVoice] Gemini API keys : {len(keys)} key(s) loaded in rotation pool")
     app.run(host="0.0.0.0", port=port, debug=False)

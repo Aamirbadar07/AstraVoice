@@ -23,9 +23,9 @@ Set the stage first, or you will burn takes on an empty calendar.
    curl http://127.0.0.1:5000/api/live_models
    ```
 
-   If `GEMINI_LIVE_MODEL` in `index.html` is not in that list, fix it first.
+   If `GEMINI_LIVE_MODEL` in `index.html` is not in that list, fix it first (or rely on AstraVoice's auto-discovery).
 
-3. **Run both processes**, then open <http://localhost:8000> in Chrome.
+3. **Run the API server**, then open <http://localhost:5000> in Chrome.
 
 4. **Dry-run the whole script once** without recording. The model is not
    deterministic; you want to know how it phrases things before you commit.
@@ -65,7 +65,7 @@ Keep it to three sentences, because the footage already carries the story:
 - **Agent books without confirming.** Rare now that the write tools require a
   code, but if it happens the tool returns `Refused:` and the agent recovers.
   That is also a fine thing to show — the guard working is the whole point.
-- **Agent speaks an event id.** Prompt rule 9 forbids it. Re-take; if it keeps
+- **Agent speaks an event id.** Prompt rule 6 forbids it. Re-take; if it keeps
   happening, that is a real prompt regression and belongs in `evals/cases.json`.
 - **Socket closes immediately (1007/1008).** Stale model name. See step 2.
 - **Dial stays dark.** `WORK_HOURS` in `index.html` does not match

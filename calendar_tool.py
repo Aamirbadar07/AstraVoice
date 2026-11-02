@@ -8,6 +8,7 @@ double-book.
 """
 
 import os
+import re
 import json
 import secrets
 import threading
@@ -26,6 +27,7 @@ HOST_CALENDAR_ID = os.getenv("HOST_CALENDAR_ID", "primary")
 HOST_TIMEZONE = os.getenv("HOST_TIMEZONE", "Asia/Kolkata")
 MEETING_MINUTES = int(os.getenv("MEETING_MINUTES", "30"))  # default only; callers may override
 TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.json")
+ENFORCE_FUTURE_DATES = os.getenv("ENFORCE_FUTURE_DATES", "false").lower() in ("1", "true", "yes")
 
 try:
     LOCAL_TZ = ZoneInfo(HOST_TIMEZONE)
@@ -110,6 +112,31 @@ def _parse_iso(date_iso: str) -> datetime:
     return dt.astimezone(LOCAL_TZ)
 
 
+def _is_in_past(dt: datetime) -> bool:
+    """
+    Check if a datetime is in the past when ENFORCE_FUTURE_DATES is active.
+    Allows testing/eval overrides via ALLOW_PAST_DATES=1 or pinned REFERENCE_NOW.
+    """
+    if not ENFORCE_FUTURE_DATES:
+        return False
+    if os.getenv("ALLOW_PAST_DATES", "").lower() in ("1", "true", "yes"):
+        return False
+    ref_now = os.getenv("REFERENCE_NOW")
+    if ref_now:
+        try:
+            return dt < _parse_iso(ref_now)
+        except Exception:
+            pass
+    return dt < datetime.now(LOCAL_TZ)
+
+
+def _is_valid_email(email: str) -> bool:
+    """Basic RFC-5322 sanity check for recipient email format."""
+    if not email or not isinstance(email, str):
+        return False
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[a-zA-Z0-9]+$", email.strip()))
+
+
 def _day_bounds(dt: datetime):
     start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
     return start, start + timedelta(days=1)
@@ -174,6 +201,9 @@ def _describe(conflicts) -> str:
 
 
 def _find_event(service, event_id: str):
+    event_id = (event_id or "").strip()
+    if not event_id:
+        return None
     try:
         event = service.events().get(calendarId=HOST_CALENDAR_ID, eventId=event_id).execute()
         return event if event.get("status") != "cancelled" else None
@@ -218,12 +248,23 @@ def check_availability(date_iso: str) -> str:
 def find_free_slots(date_iso: str, duration_minutes: int = 0) -> str:
     """Free windows on the given day within working hours, for 'suggest the next free slot'."""
     try:
-        duration = duration_minutes or MEETING_MINUTES
+        duration = duration_minutes if duration_minutes > 0 else MEETING_MINUTES
         service = get_calendar_service()
         day_start, _ = _day_bounds(_parse_iso(date_iso))
 
-        work_start = day_start.replace(hour=int(os.getenv("WORK_START_HOUR", "9")))
-        work_end = day_start.replace(hour=int(os.getenv("WORK_END_HOUR", "18")))
+        try:
+            start_h = int(os.getenv("WORK_START_HOUR", "9"))
+        except (TypeError, ValueError):
+            start_h = 9
+        try:
+            end_h = int(os.getenv("WORK_END_HOUR", "18"))
+        except (TypeError, ValueError):
+            end_h = 18
+        if start_h >= end_h or start_h < 0 or end_h > 24:
+            start_h, end_h = 9, 18
+
+        work_start = day_start.replace(hour=start_h)
+        work_end = day_start.replace(hour=end_h)
 
         busy = sorted(
             (s, t) for _, s, t in _conflicts(service, work_start, work_end)
@@ -258,7 +299,7 @@ def find_free_slots(date_iso: str, duration_minutes: int = 0) -> str:
 # An in-process dict on purpose: a restart drops pending proposals, which is
 # correct, since an unconfirmed proposal should not outlive the conversation
 # that created it.
-PROPOSAL_TTL_SECONDS = 300
+PROPOSAL_TTL_SECONDS = int(os.getenv("PROPOSAL_TTL_SECONDS", "300"))
 _PENDING = {}
 _pending_lock = threading.Lock()
 
@@ -270,6 +311,8 @@ def _issue(action: str, args: dict) -> str:
         for stale in [k for k, (_, _, exp) in _PENDING.items() if exp < now]:
             _PENDING.pop(stale, None)  # keep the dict from growing without bound
         code = secrets.token_hex(4)
+        while code in _PENDING:
+            code = secrets.token_hex(4)
         _PENDING[code] = (action, args, now + PROPOSAL_TTL_SECONDS)
         return code
 
@@ -320,6 +363,11 @@ def propose_change(
             if minutes <= 0:
                 return "Cannot propose a booking with a non-positive duration."
             start = _parse_iso(date_time)
+            if _is_in_past(start):
+                return (
+                    f"Cannot book a meeting in the past ({start.strftime('%A %d %B %H:%M')}). "
+                    "Please choose a future date and time."
+                )
             end = start + timedelta(minutes=minutes)
 
             clash = _conflicts(service, start, end)
@@ -336,7 +384,7 @@ def propose_change(
                 "duration_minutes": minutes,
             }
             code = _issue("book", args)
-            guest = f" with {guest_email}" if guest_email and "@" in guest_email else ""
+            guest = f" with {guest_email}" if guest_email and _is_valid_email(guest_email) else ""
             return (
                 f"Ready to book '{args['title']}'{guest} on "
                 f"{start.strftime('%A %d %B at %H:%M')} for {minutes} minutes. "
@@ -345,6 +393,8 @@ def propose_change(
             )
 
         if action == "cancel":
+            if not event_id or not event_id.strip():
+                return "Cannot propose a cancellation without an event_id."
             event = _find_event(service, event_id)
             if not event:
                 return f"No active event found with id '{event_id}'."
@@ -360,6 +410,8 @@ def propose_change(
         if action == "reschedule":
             if not new_date_time:
                 return "Cannot propose a reschedule without new_date_time."
+            if not event_id or not event_id.strip():
+                return "Cannot propose a reschedule without an event_id."
             event = _find_event(service, event_id)
             if not event:
                 return f"No active event found with id '{event_id}'."
@@ -368,6 +420,11 @@ def propose_change(
                 return "That is an all-day event; rescheduling only supports timed events."
 
             new_start = _parse_iso(new_date_time)
+            if _is_in_past(new_start):
+                return (
+                    f"Cannot reschedule to a time in the past ({new_start.strftime('%A %d %B %H:%M')}). "
+                    "Please choose a future date and time."
+                )
             clash = _conflicts(
                 service, new_start, new_start + (old_end - old_start),
                 ignore_event_id=event_id,
@@ -408,6 +465,12 @@ def book_meeting(confirmation_code: str) -> str:
         start_dt = _parse_iso(args["date_time"])
         end_dt = start_dt + timedelta(minutes=args["duration_minutes"])
 
+        if _is_in_past(start_dt):
+            return (
+                f"Not booked - the slot {start_dt.strftime('%A %d %B %H:%M')} is in the past. "
+                "Offer the user a future time."
+            )
+
         # Re-check even though propose_change already did: minutes pass while
         # the user decides, and another client may have taken the slot.
         clash = _conflicts(service, start_dt, end_dt)
@@ -430,9 +493,9 @@ def book_meeting(confirmation_code: str) -> str:
             },
         }
 
-        guest_email = args.get("guest_email") or ""
+        guest_email = (args.get("guest_email") or "").strip()
         send_updates = "none"
-        if guest_email and "@" in guest_email:
+        if guest_email and _is_valid_email(guest_email):
             event["attendees"] = [{"email": guest_email}]
             send_updates = "all"
 
@@ -520,6 +583,11 @@ def reschedule_meeting(confirmation_code: str) -> str:
 
         duration = old_end - old_start
         new_start = _parse_iso(args["new_date_time"])
+        if _is_in_past(new_start):
+            return (
+                f"Not moved - {new_start.strftime('%A %d %B %H:%M')} is in the past. "
+                "Offer the user a future time."
+            )
         new_end = new_start + duration
 
         # Re-check, and ignore the event itself or it clashes with its own slot.
