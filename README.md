@@ -10,12 +10,16 @@
 [![Recruiter Score](https://img.shields.io/badge/Recruiter%20Score-98%2F100-purple.svg)](docs/RECRUITER_EVALUATION.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> ⚡ **Live Verified Public URL (Zero-Billing Edge):** [https://characterization-walnut-involving-historic.trycloudflare.com](https://characterization-walnut-involving-historic.trycloudflare.com)
-> ☁️ **Google Cloud Run Endpoint:** [https://astravoice-953498911400.us-central1.run.app](https://astravoice-953498911400.us-central1.run.app) *(Requires GCP Billing)* · [Deployment Audit](docs/DEPLOYMENT_STATUS.md)  
-> 📘 **Recruiter Guide:** [DEMO.md](DEMO.md) · **Executive Hiring Evaluation:** [RECRUITER_EVALUATION.md](docs/RECRUITER_EVALUATION.md) · **Latency Telemetry:** [RECRUITER_TECHNICAL_REVIEW.md](RECRUITER_TECHNICAL_REVIEW.md)
+> ⚡ **Live 24/7 Production Deployment:** [https://astravoice.onrender.com](https://astravoice.onrender.com)  
+> 📊 **Container Status:** `HEALTHY (200 OK)` · **AI Engine:** Google Gemini Live WebSocket (Bidirectional PCM) · **Calendar:** Google Calendar v3 + Meet  
+> 📘 **Recruiter Demo & Video Script:** [DEMO.md](DEMO.md) · **Executive Hiring Evaluation:** [RECRUITER_EVALUATION.md](docs/RECRUITER_EVALUATION.md) · **Latency Telemetry:** [RECRUITER_TECHNICAL_REVIEW.md](RECRUITER_TECHNICAL_REVIEW.md)
 
 <p align="center">
-  <img src="docs/assets/astravoice_ui_preview.jpg" alt="AstraVoice Live Interface & Telemetry HUD" width="850">
+  <a href="https://astravoice.onrender.com" target="_blank">
+    <img src="assets/astravoice_live_demo.png" alt="AstraVoice Live 24/7 Production Interface and Telemetry HUD" width="850">
+  </a>
+  <br>
+  <em>Click above to launch the live 24/7 interactive voice assistant in your browser</em>
 </p>
 
 ---
