@@ -10,7 +10,8 @@
 [![Recruiter Score](https://img.shields.io/badge/Recruiter%20Score-98%2F100-purple.svg)](docs/RECRUITER_EVALUATION.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> ⚡ **Live Deployment:** [https://astravoice-953498911400.us-central1.run.app](https://astravoice-953498911400.us-central1.run.app) · [Deployment Audit](docs/DEPLOYMENT_STATUS.md)  
+> ⚡ **Live Verified Public URL (Zero-Billing Edge):** [https://characterization-walnut-involving-historic.trycloudflare.com](https://characterization-walnut-involving-historic.trycloudflare.com)
+> ☁️ **Google Cloud Run Endpoint:** [https://astravoice-953498911400.us-central1.run.app](https://astravoice-953498911400.us-central1.run.app) *(Requires GCP Billing)* · [Deployment Audit](docs/DEPLOYMENT_STATUS.md)  
 > 📘 **Recruiter Guide:** [DEMO.md](DEMO.md) · **Executive Hiring Evaluation:** [RECRUITER_EVALUATION.md](docs/RECRUITER_EVALUATION.md) · **Latency Telemetry:** [RECRUITER_TECHNICAL_REVIEW.md](RECRUITER_TECHNICAL_REVIEW.md)
 
 <p align="center">
